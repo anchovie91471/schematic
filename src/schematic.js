@@ -174,25 +174,29 @@ class Schematic {
 
     this.out(`exists. generating locales...`);
 
-    fs.readdirSync(localePath).forEach(sourceFile => {
+    // Use fs.readdir() for async behavior instead of fs.readdirSync()
+    const sourceFiles = await fs.readdir(localePath);
+
+    // Use for...of loop which works with await
+    for (const sourceFile of sourceFiles) {
       const localeFilename = sourceFile.replace('.js', '.json');
       const sourceLocalePath = path.resolve(localePath, sourceFile);
       const targetLocalePath = path.resolve(this.#opts.paths.locales, localeFilename);
 
-      const schema = this.compileSchema(sourceLocalePath);
+      // Await the async compileSchema function
+      const schema = await this.compileSchema(sourceLocalePath);
 
       if (schema) {
         try {
           const parsed = JSON.stringify(schema, null, 2);
-          fs.writeFileSync(targetLocalePath, parsed);
-        }
-        catch(err) {
+          await fs.writeFile(targetLocalePath, parsed); // Use the async version of writeFileSync
+        } catch (err) {
           return this.out(`error writing to file: ${err}`, true);
         }
 
         this.out(`ok\n`);
       }
-    });
+    }
 
     return this.writeLocalization();
   }
@@ -353,12 +357,12 @@ class Schematic {
       this.out(`${err}`, true);
     });
   }
-
-  compileSchema(file) {
+  async compileSchema(file) {
     let schema;
 
     try {
-      schema = require(file);
+      // Use dynamic import for ES Modules
+      schema = (await import(file)).default;  // `.default` is needed for ES Modules that use `export default`
     }
     catch(err) {
       return this.out([
@@ -418,7 +422,7 @@ class Schematic {
       importFile = path.resolve(this.#opts.paths.schema, `${importFilename}.js`);
     }
 
-    const schema = this.compileSchema(importFile);
+    const schema = await this.compileSchema(importFile);
 
     if (schema === false) {
       return this.out(`error compiling schema. abandoning`);
