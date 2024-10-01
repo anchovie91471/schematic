@@ -213,7 +213,7 @@ class Schematic {
 
     this.out(`uses schematic. generating schema...`);
 
-    const schema = this.compileSchema(settingsSchema);
+    const schema = await this.compileSchema(settingsSchema);
 
     if (schema) {
       try {
