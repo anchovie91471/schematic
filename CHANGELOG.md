@@ -7,6 +7,16 @@ Attempting to be more organized about feature changes between versions.
 ## Unreleased
 - n/a
 
+## 2.1.7
+- Fix: Updated remaining references in schematic.js from `@alleyford/schematic` to `@anchovie/schematic`
+
+## 2.1.6
+- **Breaking:** Package renamed from `@alleyford/schematic` to `@anchovie/schematic` - update your `package.json` and require/import statements
+- Added support for `metaobject`, `metaobject_list`, and `text_alignment` input types
+- Added `.npmignore` for cleaner package distribution
+- Added GitHub Actions workflow for automated npm publishing
+- Updated dependencies
+
 ## 2.1.5
 - Update section method to receive props object, with sane defaults
 - Fix: Don't break when localization path is undefined
