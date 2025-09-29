@@ -14,14 +14,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/AlleyFord/schematic.git"
+    "url": "git+https://github.com/anchovie91471/schematic.git"
   },
-  "author": "Josh Alley <alley@alleyford.com>",
+  "author": "Anthony Baggett <anthony.baggett@gmail.com>",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/AlleyFord/schematic/issues"
+    "url": "https://github.com/anchovie91471/schematic/issues"
   },
-  "homepage": "https://github.com/AlleyFord/schematic#readme",
+  "homepage": "https://github.com/anchovie91471/schematic#readme",
   "devDependencies": {},
   "dependencies": {
     "fs-extra": "^11.3.0"
