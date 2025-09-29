@@ -525,6 +525,10 @@ window.app.copy = {
 In the above example, `window.app.copy` is coming from the Schematic configuration option for `localization.expression`. The `%%json%%` value in that expression is needed and will be replaced with the localization strings.
 
 
+## About this fork
+This is a maintained fork of the original [schematic project](https://github.com/AlleyFord/schematic) by [AlleyFord](https://github.com/AlleyFord). Published as `@anchovie/schematic` on npm.
+
 ## Thanks
+- [AlleyFord](https://github.com/AlleyFord) for creating the original schematic project
 - David Warrington for initial inspiration: [liquid-schema-plugin](https://github.com/davidwarrington/liquid-schema-plugin)
 - [Jacob Kossman](https://github.com/jacobkossman) for contributions & feature dev
