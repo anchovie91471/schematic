@@ -609,6 +609,40 @@ window.app.copy = {
 In the above example, `window.app.copy` is coming from the Schematic configuration option for `localization.expression`. The `%%json%%` value in that expression is needed and will be replaced with the localization strings.
 
 
+## Testing
+
+Schematic includes a comprehensive test suite built with Jest to ensure reliability and catch regressions.
+
+### Running Tests
+
+```bash
+# Run all tests
+npm test
+
+# Run tests in watch mode (auto-rerun on file changes)
+npm run test:watch
+
+# Run tests with coverage report
+npm run test:coverage
+```
+
+### Test Structure
+
+Tests are organized in the `__tests__/` directory:
+
+- **Unit tests** (`__tests__/unit/`): Test individual methods and functionality
+  - `schema-compilation.test.js`: Tests schema loading and compilation
+  - `write-code.test.js`: Tests code generation (writeCode and writeCodeShort)
+
+- **Integration tests** (`__tests__/integration/`): Test complete workflows
+  - `regex-patterns.test.js`: Tests magic comment pattern matching
+
+- **Fixtures** (`__tests__/fixtures/`): Sample files for testing
+
+### For Contributors
+
+When submitting pull requests, please ensure all tests pass by running `npm test`. Consider adding tests for any new features or bug fixes.
+
 ## About this fork
 This is a maintained fork of the original [schematic project](https://github.com/AlleyFord/schematic) by [AlleyFord](https://github.com/AlleyFord). Published as `@anchovie/schematic` on npm.
 

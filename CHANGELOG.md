@@ -17,6 +17,7 @@ Attempting to be more organized about feature changes between versions.
 - **Feature:** Added `writeCodeShort` option for compact render syntax (`{% render 'filename' with section as section %}`)
 - **Enhancement:** Scaffold now auto-formats section names from filenames (e.g., `my-section` → `My Section`)
 - **Enhancement:** Improved `writeCode` formatting with trailing commas for cleaner liquid syntax
+- **Testing:** Added comprehensive test suite with Jest (13 tests covering schema compilation, code generation, and regex patterns)
 
 ## 2.1.7
 - Fix: Updated remaining references in schematic.js from `@alleyford/schematic` to `@anchovie/schematic`
