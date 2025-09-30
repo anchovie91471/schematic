@@ -178,7 +178,9 @@ The best way to run this is `npx schematic`. If you need to apply options, like 
 | SCHEMATIC_PATH_CONFIG | Path to to the Shopify `config/` directory |
 | SCHEMATIC_PATH_SECTIONS | Path to to the Shopify `sections/` directory |
 | SCHEMATIC_PATH_SNIPPETS | Path to to the Shopify `snippets/` directory |
+| SCHEMATIC_PATH_BLOCKS | Path to the Shopify `blocks/` directory |
 | SCHEMATIC_PATH_SCHEMA | Path to to the directory with our schema definitions |
+| SCHEMATIC_PATH_THEME_BLOCKS_SCHEMA | Path to the directory with theme block schema definitions |
 
 An example command to run Schematic without verbose output and a `schema` directory out of the Shopify theme root: `SCHEMATIC_VERBOSE=0 SCHEMATIC_PATH_SCHEMA=../src/schema npx schematic`
 
@@ -408,33 +410,115 @@ Running Schematic then produces the compiled schema, plus a line to render the s
 ```liquid
 {%-
 
-    render 'iconAndHeading'
-        id: section.id
-        heading_left: section.settings.heading_left
-        icon_left: section.settings.icon_left
-        heading_right: section.settings.heading_right
-        icon_right: section.settings.icon_right
-        cta_copy: section.settings.cta_copy
-        cta_link: section.settings.cta_link
+    render 'iconAndHeading',
+        id: section.id,
+        heading_left: section.settings.heading_left,
+        icon_left: section.settings.icon_left,
+        heading_right: section.settings.heading_right,
+        icon_right: section.settings.icon_right,
+        cta_copy: section.settings.cta_copy,
+        cta_link: section.settings.cta_link,
         cta_style: section.settings.cta_style
 
 -%}
 ```
 
-**Note:** When building custom Shopify themes, it's strongly recommended to use the section/snippet separation pattern, and to use `writeCode` where possible to handle connecting variables to snippets as schema changes over time. Using `writeCode` will wipe out any other code in the file.
+### Compact render syntax with `writeCodeShort`
+
+For simpler sections that use the entire section object, you can use the `writeCodeShort` option:
+
+```liquid
+{%- comment -%} schematic writeCodeShort {%- endcomment -%}
+```
+
+This generates compact syntax that passes the whole section:
+```liquid
+{%- render 'iconAndHeading' with section as section -%}
+```
+
+Use `writeCodeShort` when your snippet needs access to the full section object (settings, blocks, etc.) without explicit parameter mapping.
+
+**Note:** When building custom Shopify themes, it's strongly recommended to use the section/snippet separation pattern, and to use `writeCode` or `writeCodeShort` where possible to handle connecting variables to snippets as schema changes over time. Using either option will wipe out any other code in the file.
 
 ## Scaffolding pattern
 Reiterating the above, you can use Schematic to create placeholder files for this pattern to scaffold things out when building custom sections:
-`npx schematic scaffold iconAndHeading`
+`npx schematic scaffold my-hero-section`
 
-This will create three files:
+This will create five files:
 ```
-./sections/iconAndHeader.liquid
-./snippets/iconAndHeader.liquid
-./src/schema/iconAndHeader.js
+./sections/my-hero-section.liquid
+./snippets/my-hero-section.liquid
+./blocks/my-hero-section.liquid
+./src/schema/my-hero-section.js
+./src/schema/theme-blocks/my-hero-section.js
 ```
 
-The section file will contain the magic comment to make Schematic work, the snippet will be blank, and the schema file will contain code to include the Schematic helper methods and types.
+**Smart naming:** The schema file will automatically format the section name. For example, `my-hero-section` becomes `My Hero Section` in the generated schema, instead of a generic "Boilerplate" name.
+
+The section file will contain the `writeCode` magic comment, the snippet will be a basic template, and the schema files will contain starter code with Schematic helper methods.
+
+## Theme Blocks Support
+
+Schematic supports [Shopify theme blocks](https://shopify.dev/docs/storefronts/themes/architecture/blocks/theme-blocks), which are reusable components that can be added to any section or to the theme's JSON templates.
+
+### Directory Structure
+
+Theme blocks work similarly to sections, but live in their own directory:
+
+```
+./blocks/             # Theme block liquid files
+./src/schema/theme-blocks/  # Theme block schema definitions
+```
+
+### Using Schematic with Theme Blocks
+
+Theme blocks use the same magic comment pattern as sections:
+
+```liquid
+{%- comment -%} schematic {%- endcomment -%}
+```
+
+Or specify the schema file name:
+
+```liquid
+{%- comment -%} schematic myBlockSchema {%- endcomment -%}
+```
+
+**Example theme block:**
+
+```js
+// ./src/schema/theme-blocks/announcement.js
+
+const { app } = require('@anchovie/schematic');
+
+module.exports = {
+  name: 'Announcement',
+  settings: [
+    app.make('text', {
+      id: 'message',
+      label: 'Announcement message',
+      default: 'Welcome to our store!'
+    }),
+    app.colorSelector,
+  ],
+};
+```
+
+```liquid
+{%- comment -%} ./blocks/announcement.liquid {%- endcomment -%}
+
+<div class="announcement" style="background-color: {{ block.settings.color }}">
+  {{ block.settings.message }}
+</div>
+
+{%- comment -%} schematic {%- endcomment -%}
+```
+
+### Processing
+
+Schematic processes theme blocks **after** sections to prevent upload conflicts when using `shopify theme dev`. This ensures all dependencies are written completely before dependent files.
+
+**Note:** Theme blocks don't support `writeCode` or `writeCodeShort` options, as they use `block.settings` instead of `section.settings` and don't follow the section/snippet pattern.
 
 ## Other ways to use
 The approach is simple and can be worked into whatever setup you have for dev. Because it writes back to the existing `.liquid` files, be wary of infinite loops when including this in an automatic build step.
