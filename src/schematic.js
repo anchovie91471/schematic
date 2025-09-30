@@ -73,8 +73,12 @@ class Schematic {
 
     let statCheck = true;
     let fails = [];
+    const optionalPaths = ['blocks', 'themeBlocksSchema'];
 
     for (const [name, fpath] of Object.entries(this.#opts.paths)) {
+      // Skip optional paths in preCheck - they'll be checked when actually used
+      if (optionalPaths.includes(name)) continue;
+
       try {
         await fs.stat(path.resolve(fpath));
       }
