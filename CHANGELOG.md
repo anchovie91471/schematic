@@ -14,6 +14,9 @@ Attempting to be more organized about feature changes between versions.
 - Added `scaffold` support for creating block files
 - Added `video` input type helper
 - Blocks process sequentially after sections to prevent upload conflicts
+- **Feature:** Added `writeCodeShort` option for compact render syntax (`{% render 'filename' with section as section %}`)
+- **Enhancement:** Scaffold now auto-formats section names from filenames (e.g., `my-section` → `My Section`)
+- **Enhancement:** Improved `writeCode` formatting with trailing commas for cleaner liquid syntax
 
 ## 2.1.7
 - Fix: Updated remaining references in schematic.js from `@alleyford/schematic` to `@anchovie/schematic`

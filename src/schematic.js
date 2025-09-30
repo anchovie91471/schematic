@@ -259,7 +259,7 @@ class Schematic {
     process.exit();
   }
 
-  async scaffold(filename) {
+  async scaffold(filename, short = false) {
     filename = filename.replace(/(\.js|\.liquid|[^a-z0-9\-\_])/g, '');
 
     const files = {
@@ -281,10 +281,15 @@ class Schematic {
 
       this.out(`schematic: scaffold: creating ${type}: ${floc}\n`);
 
-      if (type === 'section') content = `{%- comment -%} schematic writeCode {%- endcomment -%}\n`;
+      if (type === 'section') content = `{%- comment -%} schematic ${short ? 'writeCodeShort' : 'writeCode'} {%- endcomment -%}\n`;
       if (type === 'snippet') content = `{%- liquid\n\n\n\n-%}\n<div class="${filename}">\n</div>\n`;
       if (type === 'block') content = `<div class="block-${filename}">\n  <!-- Block content goes here -->\n</div>\n`;
-      if (type === 'schema') content = `const { app } = require('@anchovie/schematic');\n\n\nmodule.exports = {\n  ...app.section('Boilerplate'),\n  enabled_on: {\n    templates: app.wildcard,\n    groups: app.wildcard,\n  },\n  settings: [],\n  blocks: [\n    {type: '@app'},\n  ],\n};\n`;
+      if (type === 'schema') {
+        const sectionName = filename.replace(/[\-_]/g, ' ')  // format nicely for display
+            .replace(/\b\w/g, c => c.toUpperCase()); // capitalize each word
+
+        content = `const { app } = require('@anchovie/schematic');\n\n\nmodule.exports = {\n  ...app.section('${sectionName}'),\n  enabled_on: {\n    templates: app.wildcard,\n    groups: app.wildcard,\n  },\n  settings: [],\n  blocks: [\n    {type: '@app'},\n  ],\n};\n`;
+      }
       if (type === 'blockSchema') content = `const { app } = require('@anchovie/schematic');\n\n\nmodule.exports = {\n  name: '${filename.charAt(0).toUpperCase() + filename.slice(1)}',\n  settings: [],\n};\n`;
 
       await fs.writeFile(floc, content);
@@ -623,6 +628,13 @@ class Schematic {
 
           newContents = this.writeCode(newContents, importFilename, schema);
         }
+
+        // Writes shortened render code {% render 'filename' with section as section %}
+        if (opt === 'writeCodeShort') {
+          this.out(`writing shortened switchboard code...`);
+
+          newContents = this.writeCodeShort(newContents, importFilename, schema);
+        }
       }
     }
 
@@ -632,12 +644,12 @@ class Schematic {
   }
 
   writeCode(contents, importFilename, schema) {
-    let lines = ['id: section.id'], rendered = '';
+    let lines = ['id: section.id, '], rendered = '';
 
     if (schema.settings) {
       for (const obj of schema.settings) {
         if (obj.id) {
-          lines.push(`${obj.id}: section.settings.${obj.id}`);
+          lines.push(`${obj.id}: section.settings.${obj.id},`);
         }
       }
     }
@@ -652,11 +664,18 @@ class Schematic {
 
     const code = `{%-
 
-  render '${importFilename}'
+  render '${importFilename}',
 ${rendered}
 -%}
 {%- comment -%} schematic`;
 
+    return contents.replace(/^([.\s\S]*){%\-?\s*comment\s*\-?%}\s*schematic/mgi, code);
+  }
+
+  writeCodeShort(contents, importFilename, schema) {
+    const code = `{%- render '${importFilename}' with section as section -%}
+
+{%- comment -%} schematic`;
     return contents.replace(/^([.\s\S]*){%\-?\s*comment\s*\-?%}\s*schematic/mgi, code);
   }
 };
