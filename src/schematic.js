@@ -250,16 +250,6 @@ class Schematic {
     }
   }
 
-  async buildThemeBlocks() {
-    this.out(`schematic: checking for theme blocks schema in ${this.#opts.paths.themeBlocksSchema}...`);
-
-    if (!fs.existsSync(this.#opts.paths.themeBlocksSchema)) {
-      this.out(`nothing to do\n`);
-      return;
-    }
-
-    this.out(`exists but will process blocks on-demand based on schematic comments\n`);
-  }
 
   commands() {
     return (process.argv || []).slice(2);
@@ -339,7 +329,7 @@ class Schematic {
     };
   }
 
-  async runThemeBlock(file) {
+  async runBlock(file) {
     await this.preCheck();
 
     const { floc, fstat } = await this.resolvePath(file, this.#opts.paths.blocks);
@@ -363,7 +353,7 @@ class Schematic {
       }
 
       try {
-        const newContents = await this.buildSchemaForFile(floc, contents, 'block');
+        const newContents = await this.buildBlockSchema(floc, contents);
 
         if (newContents) {
           await fs.writeFile(floc, newContents);
@@ -417,22 +407,22 @@ class Schematic {
     }
   }
 
-  async runThemeBlocks(files) {
+  async runBlocks(files) {
     await this.preCheck();
 
-    this.out(`schematic: scanning for theme block schema in ${this.#opts.paths.blocks}\n`);
+    this.out(`schematic: scanning for schema in ${this.#opts.paths.blocks}\n`);
 
     if (typeof files === 'undefined' || !files) {
       try {
         files = await fs.readdir(this.#opts.paths.blocks, 'utf8');
       } catch(err) {
-        this.out(`no blocks directory found\n`);
+        this.out(`no blocks directory found, skipping\n`);
         return;
       }
     }
 
     return Promise.all(files.map(async file => {
-      await this.runThemeBlock(file);
+      await this.runBlock(file);
     }))
       .catch(err => {
         this.out(`${err}`, true);
@@ -443,7 +433,6 @@ class Schematic {
     await this.preCheck();
     await this.buildConfig();
     await this.buildLocales();
-    await this.buildThemeBlocks();
 
     this.out(`schematic: scanning for schema in ${this.#opts.paths.sections}\n`);
 
@@ -451,17 +440,16 @@ class Schematic {
       files = await fs.readdir(this.#opts.paths.sections, 'utf8');
     }
 
-    const sectionPromise = Promise.all(files.map(async file => {
+    // Process sections first
+    await Promise.all(files.map(async file => {
       await this.runSection(file);
     }))
       .catch(err => {
         this.out(`${err}`, true);
       });
 
-    // Also run theme blocks processing
-    await this.runThemeBlocks();
-
-    return sectionPromise;
+    // Then process blocks sequentially after sections complete
+    await this.runBlocks();
   }
 
   compileSchema(file, type = 'section') {
@@ -491,15 +479,14 @@ class Schematic {
     return schema;
   }
 
-  async buildSchemaForFile(floc, contents, fileType = 'section') {
+  async buildBlockSchema(floc, contents) {
     if (typeof contents === 'undefined') {
       contents = await fs.readFile(floc, 'utf-8');
     }
 
     const fname = path.basename(floc, '.liquid');
-    const schemaPath = fileType === 'block' ? this.#opts.paths.themeBlocksSchema : this.#opts.paths.schema;
 
-    this.out(`${floc}: uses schematic. generating ${fileType} schema...`);
+    this.out(`${floc}: uses schematic. generating block schema...`);
 
     let match, importFilename, opts;
 
@@ -520,17 +507,86 @@ class Schematic {
     }
 
     // Use this.#schemaExt instead of hardcoding ".js"
-    let importFile = path.resolve(schemaPath, `${importFilename}.${this.#schemaExt}`);
+    let importFile = path.resolve(this.#opts.paths.themeBlocksSchema, `${importFilename}.${this.#schemaExt}`);
 
     // doesn't exist, likely schematic options instead
     if (!fs.existsSync(importFile)) {
       opts = importFilename;
       importFilename = filename;
       // Again, use this.#schemaExt
-      importFile = path.resolve(schemaPath, `${importFilename}.${this.#schemaExt}`);
+      importFile = path.resolve(this.#opts.paths.themeBlocksSchema, `${importFilename}.${this.#schemaExt}`);
     }
 
-    const schema = this.compileSchema(importFile, fileType);
+    const schema = this.compileSchema(importFile, 'block');
+
+    if (schema === false) {
+      return this.out(`error compiling schema. abandoning`);
+    }
+
+    const newSchema = [
+      '{% schema %}',
+      JSON.stringify(schema, null, 2),
+      '{% endschema %}',
+    ].join('\n');
+
+    let newContents;
+
+    if (this.#replaceSchemaEx.test(contents)) {
+      this.out(`replacing existing schema...`);
+      newContents = contents.replace(this.#replaceSchemaEx, newSchema);
+    }
+    else {
+      this.out(`setting new schema...`);
+      newContents = [
+        contents,
+        newSchema,
+      ].join('\n');
+    }
+
+    this.out(`ok.\n`);
+
+    return newContents;
+  }
+
+  async buildSchema(floc, contents) {
+    if (typeof contents === 'undefined') {
+      contents = await fs.readFile(floc, 'utf-8');
+    }
+
+    const fname = path.basename(floc, '.liquid');
+
+    this.out(`${floc}: uses schematic. generating schema...`);
+
+    let match, importFilename, opts;
+
+    try {
+      [match, importFilename, opts] = contents.match(this.#refSchemaEx);
+    }
+    catch(err) {
+      return this.out([
+        floc, err, 'matched failed',
+      ].join('\n'), true);
+    }
+
+    const filename = floc.match(/[^\\/]+?(?=\.\w+$)/)[0];
+
+    // if no filename, let's try to derive it from the path
+    if (!importFilename) {
+      importFilename = filename;
+    }
+
+    // Use this.#schemaExt instead of hardcoding ".js"
+    let importFile = path.resolve(this.#opts.paths.schema, `${importFilename}.${this.#schemaExt}`);
+
+    // doesn't exist, likely schematic options instead
+    if (!fs.existsSync(importFile)) {
+      opts = importFilename;
+      importFilename = filename;
+      // Again, use this.#schemaExt
+      importFile = path.resolve(this.#opts.paths.schema, `${importFilename}.${this.#schemaExt}`);
+    }
+
+    const schema = this.compileSchema(importFile);
 
     if (schema === false) {
       return this.out(`error compiling schema. abandoning`);
@@ -562,7 +618,7 @@ class Schematic {
       for (let opt of opts) {
         opt = opt.trim();
 
-        if (opt === 'writeCode' && fileType === 'section') {
+        if (opt === 'writeCode') {
           this.out(`writing switchboard code...`);
 
           newContents = this.writeCode(newContents, importFilename, schema);
@@ -573,10 +629,6 @@ class Schematic {
     this.out(`ok.\n`);
 
     return newContents;
-  }
-
-  async buildSchema(floc, contents) {
-    return this.buildSchemaForFile(floc, contents, 'section');
   }
 
   writeCode(contents, importFilename, schema) {

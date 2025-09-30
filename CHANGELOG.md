@@ -7,6 +7,14 @@ Attempting to be more organized about feature changes between versions.
 ## Unreleased
 - n/a
 
+## 2.2.0
+- **Feature:** Added support for Shopify theme blocks (credit: [@jacobkossman](https://github.com/jacobkossman))
+- Theme blocks in `blocks/` directory can now use schematic for schema generation
+- Added `SCHEMATIC_PATH_BLOCKS` and `SCHEMATIC_PATH_THEME_BLOCKS_SCHEMA` environment variables
+- Added `scaffold` support for creating block files
+- Added `video` input type helper
+- Blocks process sequentially after sections to prevent upload conflicts
+
 ## 2.1.7
 - Fix: Updated remaining references in schematic.js from `@alleyford/schematic` to `@anchovie/schematic`
 
