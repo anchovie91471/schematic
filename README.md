@@ -2,20 +2,51 @@
 A more sane approach for writing custom schema definitions within Shopify themes.
 
 ## Working with Shopify schema sucks
-Working with syntatically strict JSON in Shopify themes sucks. You can't put schema into partials to be included, breaking all hopes of modularity or code reuse, which means intensely duplicated schemas and inconsistency in naming and labeling. Worse, if you have big schemas (like icon lists) that get updated regularly, you have to update definitions everywhere they exist, which is a giant mess.
+Working with syntactically strict JSON in Shopify themes sucks. You can't put schema into partials to be included, breaking all hopes of modularity or code reuse, which means intensely duplicated schemas and inconsistency in naming and labeling. Worse, if you have big schemas (like icon lists) that get updated regularly, you have to update definitions everywhere they exist, which is a giant mess.
 
 ## This helps a little bit
 Schematic helps you write Shopify theme schema in JS, not JSON. You can build arrays or objects however you want with normal import/require. Use functions. Do whatever. This is a standalone `node` executable that will compile & swap schema definitions for sections whenever it's run. That means it edits the actual `.liquid` file for simplicity and compatibility with task runners, build managers, Shopify CLI theme serving, and whatever else.
 
 ## To use
 *Locally:*
-`npm i -D @anchovie/schematic`
+```bash
+npm i -D @anchovie/schematic
+```
 
 *Globally:*
-`npm i -g @anchovie/schematic`
+```bash
+npm i -g @anchovie/schematic
+```
 
 *Running:*
-`npx schematic`
+```bash
+npx schematic
+```
+
+### Using npm Scripts (Recommended for Teams)
+
+For consistent team workflows, add Schematic commands to your theme's `package.json`:
+
+```json
+{
+  "scripts": {
+    "schema": "schematic",
+    "schema:watch": "schematic watch"
+  }
+}
+```
+
+Then run with:
+```bash
+npm run schema
+```
+
+**Benefits:**
+- Consistent commands across the team
+- Easy to integrate with other build tools
+- Can chain with Shopify CLI: `"dev": "shopify theme dev & npm run schema:watch"`
+
+### Configuration
 
 By default, Schematic wants to be executed in the theme root and looks for schema definitions in `src/schema`. You can change this by passing arguments to the Schematic constructor, if invoking directly and not via `npx`:
 ```js
@@ -31,18 +62,66 @@ const app = new Schematic({
     file: './snippets/p-app-localization.liquid', // file to scan to replace magic comment with localization strings
     expression: 'window.app.copy = %%json%%;', // the expression to write for localization strings
   },
-  verbose: true, // show details in console if true, otherwise silent except on error
+  verbose: false, // show summary by default; set to true for detailed output with all file paths
 });
 ```
 
-Then you're free to create schema definitions, either in full, partials, or whatever else. Here's some example Schematic schema JS for a Shopify section which renders a single icon and a heading.
+## Module System Support
 
-**Support for ES6:**
-_If your root package.json file has "type": "module", you should name your schema definition files with .cjs. Read more[ here](https://nodejs.org/docs/latest-v13.x/api/esm.html#esm_enabling)_
+Schematic works with both **CommonJS** and **ES6 module** theme projects.
+
+### How It Works
+
+Schematic automatically detects your project's module system by checking your theme's `package.json`:
+
+| Your Theme Setup | Schema File Extension | Schema File Format |
+|-----------------|----------------------|-------------------|
+| No `"type"` field | `.js` | CommonJS (`module.exports`) |
+| `"type": "commonjs"` | `.js` | CommonJS (`module.exports`) |
+| `"type": "module"` | `.cjs` | CommonJS (`module.exports`) |
+
+**Important:** Regardless of your theme's module system, **all schema files must use CommonJS syntax** (`module.exports` and `require()`). This is because Schematic itself is a CommonJS package.
+
+**Note:** If you create a custom executable with `npx schematic init`, the generated file will automatically use the appropriate syntax for your project:
+- **ES6 module projects** (`"type": "module"`): Uses `import { Schematic } from '@anchovie/schematic'`
+- **CommonJS projects**: Uses `const { Schematic } = require('@anchovie/schematic')`
+
+### For ES6 Module Projects
+
+If your Shopify theme has `"type": "module"` in its `package.json`, you must name your schema files with the `.cjs` extension:
+
+```javascript
+// ✅ Correct: src/schema/mySection.cjs
+const { app } = require('@anchovie/schematic');
+
+module.exports = {
+  ...app.section('My Section'),
+  settings: [],
+};
+```
+
+```javascript
+// ❌ Wrong: src/schema/mySection.js (in ES6 module project)
+// This won't work because Node.js will try to parse it as an ES6 module
+export default {
+  ...app.section('My Section'),
+  settings: [],
+};
+```
+
+**Why `.cjs`?** When a project declares `"type": "module"`, Node.js treats all `.js` files as ES6 modules. The `.cjs` extension explicitly tells Node.js to treat the file as CommonJS, allowing Schematic's `require()` to load it properly.
+
+**Good news:** When you run `schematic scaffold <name>`, Schematic automatically creates schema files with the correct extension for your project type.
+
+_Learn more about Node.js module systems: [ES Modules](https://nodejs.org/api/esm.html) | [CommonJS Modules](https://nodejs.org/api/modules.html)_
+
+## Creating Schema Definitions
+
+Then you're free to create schema definitions, either in full, partials, or whatever else. Here's some example Schematic schema JS for a Shopify section which renders a single icon and a heading.
 
 First, some JS which exports objects we can reuse:
 ```js
-// ./src/schema/global.js (or global.cjs)
+// ./src/schema/global.js (use .cjs if your theme has "type": "module")
 
 module.exports = {
   iconWidth: {
@@ -147,30 +226,42 @@ And Schematic will intuit the path for the schema definition from the filename.
 ## Set this up as an executable
 The most straight-forward way to use this by installing globally (or as a dev dependency) and running `npx schematic` within the Shopify theme directory. That assumes you have `./src/schema/` set up with your schema definitions.
 
-If you need more customization, or your directory structure for schema definitions is different, you can create a node executable:
+If you need more customization, or your directory structure for schema definitions is different, you can create a custom executable with the init command:
 
-`touch schematic && chmod +x schematic`
-```js
-// ./schematic
-
-#!/usr/bin/env node --no-warnings
-const { Schematic } = require('@anchovie/schematic');
-
-const app = new Schematic({
-  paths: {
-    sections: './sections', // directory to look for sections
-    schema: './src/schema', // directory with schema definitions
-  },
-  verbose: true, // show details in console if true, otherwise silent except on error
-});
-
-app.run();
+```bash
+npx schematic init
 ```
 
-Then when you want to build, run the command `./schematic`.
+This creates an executable file named `schematic` with default configuration that you can customize. You can also specify a custom name:
+
+```bash
+npx schematic init my-builder
+```
+
+The generated file will include:
+- All default paths (config, sections, snippets, blocks, locales, schema, themeBlocksSchema)
+- Helpful comments explaining each option
+- `verbose: false` by default for clean summary output
+- Automatic executable permissions (`chmod +x`)
+- Automatically uses ES6 `import` syntax for projects with `"type": "module"` in package.json, or CommonJS `require()` otherwise
+
+After creation, you can edit the file to customize paths, options, and behavior. Then run it with:
+```bash
+./schematic
+```
+
+Or with your custom name:
+```bash
+./my-builder
+```
 
 ### Using the built-in executable
-The best way to run this is `npx schematic`. If you need to apply options, like verbosity or paths, you can set them in your environment:
+The best way to run this is:
+```bash
+npx schematic
+```
+
+If you need to apply options, like verbosity or paths, you can set them in your environment:
 
 | Variable | Example value |
 | --- | --- |
@@ -182,7 +273,27 @@ The best way to run this is `npx schematic`. If you need to apply options, like 
 | SCHEMATIC_PATH_SCHEMA | Path to to the directory with our schema definitions |
 | SCHEMATIC_PATH_THEME_BLOCKS_SCHEMA | Path to the directory with theme block schema definitions |
 
-An example command to run Schematic without verbose output and a `schema` directory out of the Shopify theme root: `SCHEMATIC_VERBOSE=0 SCHEMATIC_PATH_SCHEMA=../src/schema npx schematic`
+**Verbose Mode:**
+
+Default (verbose off) - Shows clean summary (e.g., "Generated: 3 sections, 2 blocks"):
+```bash
+npx schematic
+```
+
+Verbose on - Shows detailed output with all file paths and operations:
+```bash
+SCHEMATIC_VERBOSE=1 npx schematic
+```
+
+Explicit off - Same as default:
+```bash
+SCHEMATIC_VERBOSE=0 npx schematic
+```
+
+**Example with custom paths:**
+```bash
+SCHEMATIC_PATH_SCHEMA=../src/schema npx schematic
+```
 
 ## Built-in components and functions
 Since it also sucks creating a bunch of schema from scratch for every project, Schematic comes with some nice generic definitions and helper methods to use out of the box. The `app` variable derived from the package will contain everything you can use. We'll tie this together at the end to show it in use.
@@ -442,20 +553,46 @@ Use `writeCodeShort` when your snippet needs access to the full section object (
 
 ## Scaffolding pattern
 Reiterating the above, you can use Schematic to create placeholder files for this pattern to scaffold things out when building custom sections:
-`npx schematic scaffold my-hero-section`
 
-This will create five files:
+```bash
+# Create a full section with all files
+npx schematic scaffold my-hero-section
+
+# Create with short render syntax (writeCodeShort)
+npx schematic scaffold my-hero-section --short
+# or
+npx schematic scaffold my-hero-section -s
+
+# Create ONLY a theme block (no section/snippet)
+npx schematic scaffold announcement --block
+# or
+npx schematic scaffold announcement -b
+```
+
+### Full Section Scaffold
+
+`npx schematic scaffold my-hero-section` creates three section files:
 ```
 ./sections/my-hero-section.liquid
 ./snippets/my-hero-section.liquid
-./blocks/my-hero-section.liquid
 ./src/schema/my-hero-section.js
-./src/schema/theme-blocks/my-hero-section.js
 ```
+
+### Block-Only Scaffold
+
+`npx schematic scaffold announcement --block` creates two block files:
+```
+./blocks/announcement.liquid
+./src/schema/theme-blocks/announcement.js
+```
+
+**Note:** The `--short` and `--block` flags cannot be used together, as `--short` only applies to sections.
 
 **Smart naming:** The schema file will automatically format the section name. For example, `my-hero-section` becomes `My Hero Section` in the generated schema, instead of a generic "Boilerplate" name.
 
-The section file will contain the `writeCode` magic comment, the snippet will be a basic template, and the schema files will contain starter code with Schematic helper methods.
+**Automatic extension detection:** Schematic automatically creates schema files with `.cjs` extension if your theme has `"type": "module"` in package.json, or `.js` otherwise. You don't need to specify the extension.
+
+The section file will contain the `writeCode` magic comment (or `writeCodeShort` if using `--short`), the snippet will be a basic template, and the schema files will contain starter code with Schematic helper methods.
 
 ## Theme Blocks Support
 
@@ -524,7 +661,12 @@ Schematic processes theme blocks **after** sections to prevent upload conflicts 
 The approach is simple and can be worked into whatever setup you have for dev. Because it writes back to the existing `.liquid` files, be wary of infinite loops when including this in an automatic build step.
 
 ### Running on a single section file
-Schematic supports [running](https://github.com/AlleyFord/schematic/issues/4) on a single section file instead of scanning the entire contents of the project. To invoke, run `npx schematic section (path/to/file)`. This can also be invoked in code through `Schematic.runSection(filePath)`.
+Schematic supports [running](https://github.com/AlleyFord/schematic/issues/4) on a single section file instead of scanning the entire contents of the project. To invoke, run:
+```bash
+npx schematic section path/to/file
+```
+
+This can also be invoked in code through `Schematic.runSection(filePath)`.
 
 Schematic has planned support for running on individual configuration and localization files.
 

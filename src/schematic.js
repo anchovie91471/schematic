@@ -1,7 +1,7 @@
 const fs = require('fs-extra');
 const path = require('path');
-
-
+const chalk = require('chalk');
+const { Logger } = require('./logger.js');
 
 class Schematic {
   #opts = {
@@ -18,7 +18,7 @@ class Schematic {
       file: './snippets/p-app-localization.liquid',
       expression: 'window.app.copy = %%json%%;', // final semicolon is important
     },
-    verbose: true,
+    verbose: false,
   };
 
   #refSchemaEx = /{%\-?\s*comment\s*\-?%}\s*schematic\s*['"]?([^'"\s{]+)?['"]?\s*(.*)?{%\-?\s*endcomment\s*\-?%}/mi;
@@ -30,12 +30,26 @@ class Schematic {
   // New field to store which extension to use
   #schemaExt = 'js';
 
+  // Logger instance
+  logger = null;
+
+  // Processing counters for summary output
+  #counters = {
+    sections: 0,
+    blocks: 0,
+    settings: 0,
+    locales: 0,
+  };
+
   //loader = require.resolve('./webpackLoader.js');
 
   constructor(opts = null) {
     if (opts) {
       this.#opts = opts;
     }
+
+    // Initialize logger
+    this.logger = new Logger(this.#opts.verbose);
 
     // Check package.json for "type"
     try {
@@ -51,7 +65,8 @@ class Schematic {
 
   envDefaults() {
     if ([true, 'true', 1, '1'].includes(process.env.SCHEMATIC_VERBOSE)) this.#opts.verbose = true;
-    else this.#opts.verbose = false;
+    else if ([false, 'false', 0, '0'].includes(process.env.SCHEMATIC_VERBOSE)) this.#opts.verbose = false;
+    // If env var not set, keep constructor default (verbose: false)
 
     if (process.env.SCHEMATIC_PATH_CONFIG) this.#opts.paths.config = String(process.env.SCHEMATIC_PATH_CONFIG).trim();
     if (process.env.SCHEMATIC_PATH_SECTIONS) this.#opts.paths.sections = String(process.env.SCHEMATIC_PATH_SECTIONS).trim();
@@ -66,6 +81,38 @@ class Schematic {
 
     if (this.#opts.verbose || isError) process.stdout.write(v + (isError ? "\n" : ''));
     if (isError) return false;
+  }
+
+  // Helper to convert absolute paths to relative for cleaner output
+  relativePath(absolutePath) {
+    const relative = path.relative(process.cwd(), absolutePath);
+    // If the path starts with ../ it means it's outside the project, keep absolute
+    return relative.startsWith('..') ? absolutePath : `./${relative}`;
+  }
+
+  // Reset counters for new run
+  resetCounters() {
+    this.#counters.sections = 0;
+    this.#counters.blocks = 0;
+    this.#counters.settings = 0;
+    this.#counters.locales = 0;
+  }
+
+  // Print summary of what was processed
+  printSummary() {
+    if (this.#opts.verbose) return; // Don't show summary in verbose mode
+
+    const items = [];
+    if (this.#counters.sections > 0) items.push(`${this.#counters.sections} section${this.#counters.sections === 1 ? '' : 's'}`);
+    if (this.#counters.blocks > 0) items.push(`${this.#counters.blocks} block${this.#counters.blocks === 1 ? '' : 's'}`);
+    if (this.#counters.settings > 0) items.push(`${this.#counters.settings} settings schema`);
+    if (this.#counters.locales > 0) items.push(`${this.#counters.locales} locale${this.#counters.locales === 1 ? '' : 's'}`);
+
+    if (items.length > 0) {
+      const icon = this.logger.useColor ? chalk.green('✓') : '✓';
+      const text = this.logger.useColor ? chalk.green(`Generated: ${items.join(', ')}`) : `Generated: ${items.join(', ')}`;
+      console.log(icon, text);
+    }
   }
 
   async preCheck() {
@@ -88,8 +135,18 @@ class Schematic {
     }
 
     if (fails.length) {
-      console.log('could not find required directories from this path. run in the shopify theme root? (' + fails.join(', ') + ')');
-      process.exit();
+      this.logger.error('Missing required directories');
+      console.log('   Missing:', fails.map(f => f.split(':')[1]).join(', '));
+      console.log();
+      console.log(this.logger.useColor ? chalk.yellow('💡 Tip:') : 'Tip:',
+        'Run this command from your Shopify theme root directory');
+      console.log('   Expected structure:');
+      console.log('   - ./config/');
+      console.log('   - ./sections/');
+      console.log('   - ./snippets/');
+      console.log('   - ./locales/');
+      console.log('   - ./src/schema/');
+      process.exit(1);
     }
 
     this.#preCheckOk = true;
@@ -97,16 +154,16 @@ class Schematic {
 
   async writeLocalization() {
     if(this.#opts.localization === undefined){
-      this.out(`schematic: checking for localization.. nothing to do\n`);
+      this.logger.debug('Checking for localization... nothing to do');
       return;
     }
 
-    this.out(`schematic: attempting to write localization in ${this.#opts.localization.file}...`);
+    this.logger.info(`Writing localization to ${this.#opts.localization.file}`);
 
     const localizationFile = path.resolve(this.#opts.localization.file);
 
     if (!fs.existsSync(localizationFile)) {
-      this.out(`nothing to do\n`);
+      this.logger.debug('Localization file not found, skipping');
       return;
     }
 
@@ -117,7 +174,8 @@ class Schematic {
 
       // no schematic tag to replace
       if (!this.#localizationEx.test(contents)) {
-        return this.out(`${localizationFile}: no schematic code\n`);
+        this.logger.debug(`${localizationFile}: no schematic code`);
+        return;
       }
       else {
         // capture the comment to rewrite and preserve author's stylistic preferences
@@ -125,11 +183,13 @@ class Schematic {
       }
 
       if (!contents) {
-        return this.out(`${localizationFile}: no file contents\n`);
+        this.logger.warn(`${localizationFile}: no file contents`);
+        return;
       }
     }
     catch(err) {
-      return this.out(`${localizationFile}: ${err}`, true);
+      this.logger.error(`${localizationFile}: ${err.message}`);
+      return;
     }
 
     let defaultLocale;
@@ -142,7 +202,8 @@ class Schematic {
           defaultLocale = JSON.parse(fs.readFileSync(localePath, 'utf8'));
         }
         catch(err) {
-          return this.out(`error reading & parsing default locale ${localePath}: ${err}`, true);
+          this.logger.error(`Error reading default locale ${localePath}: ${err.message}`);
+          return false;
         }
       }
 
@@ -182,24 +243,23 @@ class Schematic {
       }
 
       await fs.writeFile(localizationFile, newContents);
+      this.logger.success('Localization written');
     }
     catch(err) {
-      return this.out(`couldn't write localization: ${err}`, true);
+      this.logger.error(`Couldn't write localization: ${err.message}`);
     }
-
-    return this.out(`ok\n`);
   }
 
   async buildLocales() {
     const localePath = `${this.#opts.paths.schema}/locales`;
-    this.out(`schematic: checking for locale definitions in ${localePath}...`);
+    this.logger.info(`Checking for locale definitions in ${localePath}`);
 
     if (!fs.existsSync(localePath)) {
-      this.out(`nothing to do\n`);
+      this.logger.debug('No locale definitions found');
       return;
     }
 
-    this.out(`exists. generating locales...`);
+    this.logger.info('Generating locales...');
 
     fs.readdirSync(localePath).forEach(sourceFile => {
       // Replace `.${this.#schemaExt}` with `.json`
@@ -213,12 +273,13 @@ class Schematic {
         try {
           const parsed = JSON.stringify(schema, null, 2);
           fs.writeFileSync(targetLocalePath, parsed);
+          this.logger.success(`✓ ${localeFilename}`);
+          this.#counters.locales++;
         }
         catch(err) {
-          return this.out(`error writing to file: ${err}`, true);
+          this.logger.error(`Error writing ${localeFilename}: ${err.message}`);
+          return;
         }
-
-        this.out(`ok\n`);
       }
     });
 
@@ -227,16 +288,16 @@ class Schematic {
 
   async buildConfig() {
     // Use this.#schemaExt in the path and the log message
-    this.out(`schematic: checking for ${this.#opts.paths.schema}/settings_schema.${this.#schemaExt}...`);
+    this.logger.info(`Checking for ${this.#opts.paths.schema}/settings_schema.${this.#schemaExt}`);
 
     const settingsSchema = path.resolve(this.#opts.paths.schema, `settings_schema.${this.#schemaExt}`);
 
     if (!fs.existsSync(settingsSchema)) {
-      this.out(`nothing to do\n`);
+      this.logger.debug('No settings schema found');
       return;
     }
 
-    this.out(`uses schematic. generating schema...`);
+    this.logger.info('Generating settings schema...');
 
     const schema = this.compileSchema(settingsSchema, 'schema');
 
@@ -247,10 +308,11 @@ class Schematic {
         await fs.writeFile(path.resolve(this.#opts.paths.config, 'settings_schema.json'), parsed);
       }
       catch(err) {
-        return this.out(`error writing to file: ${err}`, true);
+        return this.logger.error(`Error writing settings_schema.json: ${err.message}`);
       }
 
-      this.out(`ok\n`);
+      this.logger.success('✓ settings_schema.json');
+      this.#counters.settings++;
     }
   }
 
@@ -263,8 +325,13 @@ class Schematic {
     process.exit();
   }
 
-  async scaffold(filename, short = false) {
+  async scaffold(filename, short = false, blockOnly = false) {
     filename = filename.replace(/(\.js|\.liquid|[^a-z0-9\-\_])/g, '');
+
+    // If blockOnly, create only block-related files; otherwise create section files only
+    const filesToCreate = blockOnly
+      ? ['block', 'blockSchema']
+      : ['section', 'snippet', 'schema'];
 
     const files = {
       section: `${this.#opts.paths.sections}/${filename}.liquid`,
@@ -275,28 +342,135 @@ class Schematic {
     };
 
     for (const [type, file] of Object.entries(files)) {
+      // Skip files not in filesToCreate list
+      if (!filesToCreate.includes(type)) continue;
+
       const floc = path.resolve(file);
       let content = '';
 
       if (fs.existsSync(floc)) {
-        this.out(`schematic: scaffold: file exists: ${floc}`, true);
+        this.logger.fileExists(floc);
         continue;
       }
 
-      this.out(`schematic: scaffold: creating ${type}: ${floc}\n`);
-
       if (type === 'section') content = `{%- comment -%} schematic ${short ? 'writeCodeShort' : 'writeCode'} {%- endcomment -%}\n`;
       if (type === 'snippet') content = `{%- liquid\n\n\n\n-%}\n<div class="${filename}">\n</div>\n`;
-      if (type === 'block') content = `<div class="block-${filename}">\n  <!-- Block content goes here -->\n</div>\n`;
+      if (type === 'block') {
+        const blockName = filename.replace(/[\-_]/g, ' ')
+          .replace(/\b\w/g, c => c.toUpperCase());
+
+        content = `{%- comment -%} ${blockName} Block {%- endcomment -%}
+
+<div class="block-${filename}">
+  {%- comment -%} Block content here {%- endcomment -%}
+</div>
+
+{%- comment -%} schematic {%- endcomment -%}
+`;
+      }
       if (type === 'schema') {
         const sectionName = filename.replace(/[\-_]/g, ' ')  // format nicely for display
             .replace(/\b\w/g, c => c.toUpperCase()); // capitalize each word
 
         content = `const { app } = require('@anchovie/schematic');\n\n\nmodule.exports = {\n  ...app.section('${sectionName}'),\n  enabled_on: {\n    templates: app.wildcard,\n    groups: app.wildcard,\n  },\n  settings: [],\n  blocks: [\n    {type: '@app'},\n  ],\n};\n`;
       }
-      if (type === 'blockSchema') content = `const { app } = require('@anchovie/schematic');\n\n\nmodule.exports = {\n  name: '${filename.charAt(0).toUpperCase() + filename.slice(1)}',\n  settings: [],\n};\n`;
+      if (type === 'blockSchema') {
+        const blockName = filename.replace(/[\-_]/g, ' ')
+          .replace(/\b\w/g, c => c.toUpperCase());
 
-      await fs.writeFile(floc, content);
+        content = `const { app } = require('@anchovie/schematic');\n\nmodule.exports = {\n  name: '${blockName}',\n  settings: [],\n};\n`;
+      }
+
+      // Write file with automatic directory creation
+      try {
+        await fs.outputFile(floc, content);
+        this.logger.fileCreated(type, floc);
+      }
+      catch(err) {
+        this.logger.error(`Failed to create ${type}: ${err.message}`);
+      }
+    }
+  }
+
+  async init(filename = 'schematic') {
+    // Remove any extension if provided
+    filename = filename.replace(/\.(js|cjs|mjs)$/, '');
+
+    const filePath = path.resolve(process.cwd(), filename);
+
+    // Check if file already exists
+    if (fs.existsSync(filePath)) {
+      this.logger.error(`File already exists: ${filename}`);
+      console.log('  Please choose a different name or remove the existing file.');
+      process.exit(1);
+    }
+
+    // Detect project module type from package.json
+    let isESModule = false;
+    try {
+      const pkgPath = path.resolve(process.cwd(), 'package.json');
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+      if (pkg.type === 'module') {
+        isESModule = true;
+      }
+    } catch {
+      // Default to CommonJS if can't read package.json
+    }
+
+    // Generate the executable template based on module type
+    const template = isESModule
+      ? `#!/usr/bin/env node
+import { Schematic } from '@anchovie/schematic';
+
+// Customize paths below to match your theme structure
+const app = new Schematic({
+  paths: {
+    config: './config',           // Shopify config directory
+    sections: './sections',       // Section files
+    snippets: './snippets',       // Snippet files
+    blocks: './blocks',           // Theme block files (optional)
+    locales: './locales',         // Locale JSON files
+    schema: './src/schema',       // Schema definitions
+    themeBlocksSchema: './src/schema/theme-blocks',  // Block schema (optional)
+  },
+  verbose: false,  // Set to true for detailed output with file paths
+});
+
+app.run();
+`
+      : `#!/usr/bin/env node
+const { Schematic } = require('@anchovie/schematic');
+
+// Customize paths below to match your theme structure
+const app = new Schematic({
+  paths: {
+    config: './config',           // Shopify config directory
+    sections: './sections',       // Section files
+    snippets: './snippets',       // Snippet files
+    blocks: './blocks',           // Theme block files (optional)
+    locales: './locales',         // Locale JSON files
+    schema: './src/schema',       // Schema definitions
+    themeBlocksSchema: './src/schema/theme-blocks',  // Block schema (optional)
+  },
+  verbose: false,  // Set to true for detailed output with file paths
+});
+
+app.run();
+`;
+
+    try {
+      // Write the file
+      await fs.writeFile(filePath, template);
+
+      // Make it executable
+      await fs.chmod(filePath, '755');
+
+      this.logger.success(`Created executable: ${filename}`);
+      console.log(`\n  Run it with: ./${filename}\n`);
+    }
+    catch(err) {
+      this.logger.error(`Failed to create executable: ${err.message}`);
+      process.exit(1);
     }
   }
 
@@ -351,14 +525,14 @@ class Schematic {
 
         // no schematic tag to replace
         if (!this.#refSchemaEx.test(contents)) {
-          return this.out(`${floc}: no schematic code\n`);
+          return this.logger.debug(`${this.relativePath(floc)}: no schematic code`);
         }
         if (!contents) {
-          return this.out(`${floc}: no file contents\n`);
+          return this.logger.debug(`${this.relativePath(floc)}: no file contents`);
         }
       }
       catch(err) {
-        this.out(`${floc}: ${err}`, true);
+        this.logger.error(`${this.relativePath(floc)}: ${err.message}`);
       }
 
       try {
@@ -366,13 +540,14 @@ class Schematic {
 
         if (newContents) {
           await fs.writeFile(floc, newContents);
+          this.#counters.blocks++;
         }
         else {
-          this.out(`${floc}: new contents failed\n`);
+          this.logger.error(`${this.relativePath(floc)}: new contents failed`);
         }
       }
       catch(err) {
-        this.out(`${floc}: ${err}`, true);
+        this.logger.error(`${this.relativePath(floc)}: ${err.message}`);
       }
     }
   }
@@ -390,14 +565,14 @@ class Schematic {
 
         // no schematic tag to replace
         if (!this.#refSchemaEx.test(contents)) {
-          return this.out(`${floc}: no schematic code\n`);
+          return this.logger.debug(`${this.relativePath(floc)}: no schematic code`);
         }
         if (!contents) {
-          return this.out(`${floc}: no file contents\n`);
+          return this.logger.debug(`${this.relativePath(floc)}: no file contents`);
         }
       }
       catch(err) {
-        this.out(`${floc}: ${err}`, true);
+        this.logger.error(`${this.relativePath(floc)}: ${err.message}`);
       }
 
       try {
@@ -405,13 +580,14 @@ class Schematic {
 
         if (newContents) {
           await fs.writeFile(floc, newContents);
+          this.#counters.sections++;
         }
         else {
-          this.out(`${floc}: new contents failed\n`);
+          this.logger.error(`${this.relativePath(floc)}: new contents failed`);
         }
       }
       catch(err) {
-        this.out(`${floc}: ${err}`, true);
+        this.logger.error(`${this.relativePath(floc)}: ${err.message}`);
       }
     }
   }
@@ -419,13 +595,13 @@ class Schematic {
   async runBlocks(files) {
     await this.preCheck();
 
-    this.out(`schematic: scanning for schema in ${this.#opts.paths.blocks}\n`);
+    this.logger.info(`Scanning for schema in ${this.#opts.paths.blocks}`);
 
     if (typeof files === 'undefined' || !files) {
       try {
         files = await fs.readdir(this.#opts.paths.blocks, 'utf8');
       } catch(err) {
-        this.out(`no blocks directory found, skipping\n`);
+        this.logger.debug('No blocks directory found, skipping');
         return;
       }
     }
@@ -434,16 +610,18 @@ class Schematic {
       await this.runBlock(file);
     }))
       .catch(err => {
-        this.out(`${err}`, true);
+        this.logger.error(err.message);
       });
   }
 
   async run(files) {
+    this.resetCounters();
+
     await this.preCheck();
     await this.buildConfig();
     await this.buildLocales();
 
-    this.out(`schematic: scanning for schema in ${this.#opts.paths.sections}\n`);
+    this.logger.info(`Scanning for schema in ${this.#opts.paths.sections}`);
 
     if (typeof files === 'undefined' || !files) {
       files = await fs.readdir(this.#opts.paths.sections, 'utf8');
@@ -454,11 +632,14 @@ class Schematic {
       await this.runSection(file);
     }))
       .catch(err => {
-        this.out(`${err}`, true);
+        this.logger.error(err.message);
       });
 
     // Then process blocks sequentially after sections complete
     await this.runBlocks();
+
+    // Print summary if not in verbose mode
+    this.printSummary();
   }
 
   compileSchema(file, type = 'section') {
@@ -468,15 +649,47 @@ class Schematic {
       schema = require(file);
     }
     catch(err) {
-      return this.out([
-        err, `schema not loadable: ${file}`,
-      ].join('\n'), true);
+      this.logger.schemaError(
+        file,
+        err.message,
+        'Failed to load schema file - check for syntax errors'
+      );
+      return false;
     }
 
     if (typeof schema !== 'object') {
-      return this.out([
-        schema, `schema not javascript object`,
-      ].join('\n'), true);
+      this.logger.schemaError(
+        file,
+        'Schema must export a JavaScript object using module.exports',
+        'Schema compilation'
+      );
+      return false;
+    }
+
+    // Validate unique IDs in section settings
+    if (schema.settings) {
+      const validation = this.validateUniqueIds(schema.settings, file, 'section settings');
+      if (!validation.valid) {
+        return false;
+      }
+    }
+
+    // Validate unique IDs in each block's settings
+    if (schema.blocks) {
+      for (let i = 0; i < schema.blocks.length; i++) {
+        const block = schema.blocks[i];
+        if (block.settings) {
+          const blockType = block.type || `block ${i}`;
+          const validation = this.validateUniqueIds(
+            block.settings,
+            file,
+            `block "${blockType}" settings`
+          );
+          if (!validation.valid) {
+            return false;
+          }
+        }
+      }
     }
 
     // transforms for old schema to new shopify schema
@@ -488,6 +701,54 @@ class Schematic {
     return schema;
   }
 
+  validateUniqueIds(settingsArray, file, context = 'settings') {
+    const ids = new Map(); // Use Map to track first occurrence with index
+    const duplicates = [];
+
+    settingsArray.forEach((setting, index) => {
+      if (setting.id) {
+        if (ids.has(setting.id)) {
+          duplicates.push({
+            id: setting.id,
+            firstPosition: ids.get(setting.id) + 1,
+            duplicatePosition: index + 1,
+            label: setting.label || '(no label)'
+          });
+        } else {
+          ids.set(setting.id, index);
+        }
+      }
+    });
+
+    if (duplicates.length > 0) {
+      this.logger.error(`Duplicate setting IDs found in ${context}`);
+      console.log(this.logger.useColor ? chalk.gray(`   File: ${file}`) : `   File: ${file}`);
+      console.log();
+
+      duplicates.forEach(dup => {
+        const red = this.logger.useColor ? chalk.red : (str) => str;
+        const gray = this.logger.useColor ? chalk.gray : (str) => str;
+
+        console.log(red(`   ✗ "${dup.id}"`));
+        console.log(gray(`     First occurrence: position ${dup.firstPosition}`));
+        console.log(gray(`     Duplicate: position ${dup.duplicatePosition}`));
+        console.log(gray(`     Label: ${dup.label}`));
+        console.log();
+      });
+
+      const yellow = this.logger.useColor ? chalk.yellow : (str) => str;
+      const gray = this.logger.useColor ? chalk.gray : (str) => str;
+
+      console.log(yellow('💡 Tip:'), 'Each setting ID must be unique within its scope');
+      console.log(gray('   Rename one of the duplicate IDs to fix this error.'));
+      console.log();
+
+      return { valid: false, duplicates };
+    }
+
+    return { valid: true, duplicates: [] };
+  }
+
   async buildBlockSchema(floc, contents) {
     if (typeof contents === 'undefined') {
       contents = await fs.readFile(floc, 'utf-8');
@@ -495,7 +756,7 @@ class Schematic {
 
     const fname = path.basename(floc, '.liquid');
 
-    this.out(`${floc}: uses schematic. generating block schema...`);
+    this.logger.info(`${this.relativePath(floc)}: generating block schema...`);
 
     let match, importFilename, opts;
 
@@ -503,9 +764,7 @@ class Schematic {
       [match, importFilename, opts] = contents.match(this.#refSchemaEx);
     }
     catch(err) {
-      return this.out([
-        floc, err, 'matched failed',
-      ].join('\n'), true);
+      return this.logger.error(`${this.relativePath(floc)}: ${err.message} - match failed`);
     }
 
     const filename = floc.match(/[^\\/]+?(?=\.\w+$)/)[0];
@@ -529,7 +788,7 @@ class Schematic {
     const schema = this.compileSchema(importFile, 'block');
 
     if (schema === false) {
-      return this.out(`error compiling schema. abandoning`);
+      return this.logger.error('Error compiling schema, abandoning');
     }
 
     const newSchema = [
@@ -541,18 +800,18 @@ class Schematic {
     let newContents;
 
     if (this.#replaceSchemaEx.test(contents)) {
-      this.out(`replacing existing schema...`);
+      this.logger.debug('Replacing existing schema...');
       newContents = contents.replace(this.#replaceSchemaEx, newSchema);
     }
     else {
-      this.out(`setting new schema...`);
+      this.logger.debug('Setting new schema...');
       newContents = [
         contents,
         newSchema,
       ].join('\n');
     }
 
-    this.out(`ok.\n`);
+    this.logger.success('✓ Block schema generated');
 
     return newContents;
   }
@@ -564,7 +823,7 @@ class Schematic {
 
     const fname = path.basename(floc, '.liquid');
 
-    this.out(`${floc}: uses schematic. generating schema...`);
+    this.logger.info(`${this.relativePath(floc)}: generating schema...`);
 
     let match, importFilename, opts;
 
@@ -572,9 +831,7 @@ class Schematic {
       [match, importFilename, opts] = contents.match(this.#refSchemaEx);
     }
     catch(err) {
-      return this.out([
-        floc, err, 'matched failed',
-      ].join('\n'), true);
+      return this.logger.error(`${this.relativePath(floc)}: ${err.message} - match failed`);
     }
 
     const filename = floc.match(/[^\\/]+?(?=\.\w+$)/)[0];
@@ -598,7 +855,7 @@ class Schematic {
     const schema = this.compileSchema(importFile);
 
     if (schema === false) {
-      return this.out(`error compiling schema. abandoning`);
+      return this.logger.error('Error compiling schema, abandoning');
     }
 
     const newSchema = [
@@ -610,11 +867,11 @@ class Schematic {
     let newContents;
 
     if (this.#replaceSchemaEx.test(contents)) {
-      this.out(`replacing existing schema...`);
+      this.logger.debug('Replacing existing schema...');
       newContents = contents.replace(this.#replaceSchemaEx, newSchema);
     }
     else {
-      this.out(`setting new schema...`);
+      this.logger.debug('Setting new schema...');
       newContents = [
         contents,
         newSchema,
@@ -628,21 +885,21 @@ class Schematic {
         opt = opt.trim();
 
         if (opt === 'writeCode') {
-          this.out(`writing switchboard code...`);
+          this.logger.debug('Writing switchboard code...');
 
           newContents = this.writeCode(newContents, importFilename, schema);
         }
 
         // Writes shortened render code {% render 'filename' with section as section %}
         if (opt === 'writeCodeShort') {
-          this.out(`writing shortened switchboard code...`);
+          this.logger.debug('Writing shortened switchboard code...');
 
           newContents = this.writeCodeShort(newContents, importFilename, schema);
         }
       }
     }
 
-    this.out(`ok.\n`);
+    this.logger.success('✓ Schema generated');
 
     return newContents;
   }
