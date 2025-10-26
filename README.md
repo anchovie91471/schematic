@@ -1,6 +1,8 @@
 # Schematic
 A more sane approach for writing custom schema definitions within Shopify themes.
 
+> **Note:** This is a maintained fork of the original [`@alleyford/schematic`](https://github.com/AlleyFord/schematic) by [@alleyford](https://github.com/AlleyFord). The original package is still available, but all new features and improvements are being added to `@anchovie/schematic`.
+
 ## Working with Shopify schema sucks
 Working with syntactically strict JSON in Shopify themes sucks. You can't put schema into partials to be included, breaking all hopes of modularity or code reuse, which means intensely duplicated schemas and inconsistency in naming and labeling. Worse, if you have big schemas (like icon lists) that get updated regularly, you have to update definitions everywhere they exist, which is a giant mess.
 
