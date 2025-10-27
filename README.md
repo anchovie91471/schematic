@@ -6,18 +6,13 @@ A more sane approach for writing custom schema definitions within Shopify themes
 ## Working with Shopify schema sucks
 Working with syntactically strict JSON in Shopify themes sucks. You can't put schema into partials to be included, breaking all hopes of modularity or code reuse, which means intensely duplicated schemas and inconsistency in naming and labeling. Worse, if you have big schemas (like icon lists) that get updated regularly, you have to update definitions everywhere they exist, which is a giant mess.
 
-## This helps a little bit
+## Schematic helps
 Schematic helps you write Shopify theme schema in JS, not JSON. You can build arrays or objects however you want with normal import/require. Use functions. Do whatever. This is a standalone `node` executable that will compile & swap schema definitions for sections whenever it's run. That means it edits the actual `.liquid` file for simplicity and compatibility with task runners, build managers, Shopify CLI theme serving, and whatever else.
 
 ## To use
-*Locally:*
+*Install Schematic:*
 ```bash
 npm i -D @anchovie/schematic
-```
-
-*Globally:*
-```bash
-npm i -g @anchovie/schematic
 ```
 
 *Running:*
@@ -44,6 +39,7 @@ npm run schema
 ```
 
 **Benefits:**
+
 - Consistent commands across the team
 - Easy to integrate with other build tools
 - Can chain with Shopify CLI: `"dev": "shopify theme dev & npm run schema:watch"`
@@ -226,7 +222,7 @@ If you've named your schema and section files the same (`./src/schema/iconAndHea
 And Schematic will intuit the path for the schema definition from the filename.
 
 ## Set this up as an executable
-The most straight-forward way to use this by installing globally (or as a dev dependency) and running `npx schematic` within the Shopify theme directory. That assumes you have `./src/schema/` set up with your schema definitions.
+The recommended approach is to install Schematic as a dev dependency in your theme project. This ensures everyone on your team uses the same version and makes your project more portable. Simply run `npx schematic` within the Shopify theme directory. This assumes you have `./src/schema/` set up with your schema definitions.
 
 If you need more customization, or your directory structure for schema definitions is different, you can create a custom executable with the init command:
 
