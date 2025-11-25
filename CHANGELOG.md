@@ -7,6 +7,12 @@ Attempting to be more organized about feature changes between versions.
 ## Unreleased
 - n/a
 
+## 2.2.2
+- **Fix:** `sidebar()` and `header()` helpers now handle top-level Shopify properties like `visible_if`
+  - These helpers were previously nesting all properties inside an `info` object
+  - Shopify expects certain properties like `visible_if` to be at the top level of the setting object
+  - Now correctly extracts top-level properties while keeping other properties in `info`
+
 ## 2.2.1
 - **Feature:** Added `npx schematic init` command to generate custom executable
   - Creates executable file with default configuration and helpful comments
