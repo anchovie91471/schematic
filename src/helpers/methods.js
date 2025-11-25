@@ -152,7 +152,27 @@ const methods =
       content: content,
     };
 
-    if (typeof info !== 'undefined') obj.info = info;
+    if (typeof info !== 'undefined') {
+      // If info is an object, check for top-level Shopify properties
+      if (typeof info === 'object' && info !== null && !Array.isArray(info)) {
+        const topLevelProps = ['visible_if'];
+
+        topLevelProps.forEach(prop => {
+          if (info.hasOwnProperty(prop)) {
+            obj[prop] = info[prop];
+            delete info[prop];
+          }
+        });
+
+        // Only add info object if there are remaining properties
+        if (Object.keys(info).length > 0) {
+          obj.info = info;
+        }
+      } else {
+        // For non-object info (string, etc.), keep original behavior
+        obj.info = info;
+      }
+    }
 
     return obj;
   },
