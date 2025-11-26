@@ -17,6 +17,7 @@ Attempting to be more organized about feature changes between versions.
   - These helpers were previously nesting all properties inside an `info` object
   - Shopify expects certain properties like `visible_if` to be at the top level of the setting object
   - Now correctly extracts top-level properties while keeping other properties in `info`
+- **Fix:** Added "Schematic generated..." instead of "Generated..." to final message for clarity in CLI
 
 ## 2.2.1
 - **Feature:** Added `npx schematic init` command to generate custom executable
