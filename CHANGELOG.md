@@ -7,7 +7,12 @@ Attempting to be more organized about feature changes between versions.
 ## Unreleased
 - n/a
 
-## 2.2.2
+## 2.2.3
+- **Feature:** Progress spinner during build
+  - Shows animated spinner with count progress: "Building sections (12/56)..."
+  - Updates in real-time as files are processed
+  - Only displays in interactive terminals (disabled in CI, pipes, or verbose mode)
+  - Added ora dependency for spinner animation
 - **Fix:** `sidebar()` and `header()` helpers now handle top-level Shopify properties like `visible_if`
   - These helpers were previously nesting all properties inside an `info` object
   - Shopify expects certain properties like `visible_if` to be at the top level of the setting object

@@ -3,6 +3,15 @@ const path = require('path');
 const chalk = require('chalk');
 const { Logger } = require('./logger.js');
 
+// Dynamic import for ora (ESM package)
+let ora;
+const getOra = async () => {
+  if (!ora) {
+    ora = (await import('ora')).default;
+  }
+  return ora;
+};
+
 class Schematic {
   #opts = {
     paths: {
@@ -110,7 +119,7 @@ class Schematic {
 
     if (items.length > 0) {
       const icon = this.logger.useColor ? chalk.green('✓') : '✓';
-      const text = this.logger.useColor ? chalk.green(`Generated: ${items.join(', ')}`) : `Generated: ${items.join(', ')}`;
+      const text = this.logger.useColor ? chalk.green(`Schematic generated: ${items.join(', ')}`) : `Schematic generated: ${items.join(', ')}`;
       console.log(icon, text);
     }
   }
@@ -592,14 +601,15 @@ app.run();
     }
   }
 
-  async runBlocks(files) {
+  async runBlocks(files, spinner = null, totalBlocks = 0) {
     await this.preCheck();
 
     this.logger.info(`Scanning for schema in ${this.#opts.paths.blocks}`);
 
-    if (typeof files === 'undefined' || !files) {
+    if (typeof files === 'undefined' || !files || files.length === 0) {
       try {
         files = await fs.readdir(this.#opts.paths.blocks, 'utf8');
+        totalBlocks = files.length;
       } catch(err) {
         this.logger.debug('No blocks directory found, skipping');
         return;
@@ -608,6 +618,9 @@ app.run();
 
     return Promise.all(files.map(async file => {
       await this.runBlock(file);
+      if (spinner && totalBlocks > 0) {
+        spinner.text = `Building blocks (${this.#counters.blocks}/${totalBlocks})...`;
+      }
     }))
       .catch(err => {
         this.logger.error(err.message);
@@ -618,25 +631,65 @@ app.run();
     this.resetCounters();
 
     await this.preCheck();
+
+    // Set up spinner for non-verbose TTY mode
+    let spinner = null;
+    const useSpinner = !this.#opts.verbose && process.stdout.isTTY;
+    if (useSpinner) {
+      const oraFn = await getOra();
+      spinner = oraFn('Building...').start();
+    }
+
+    // Pre-scan directories to get totals for progress display
+    if (typeof files === 'undefined' || !files) {
+      files = await fs.readdir(this.#opts.paths.sections, 'utf8');
+    }
+    let blockFiles = [];
+    try {
+      blockFiles = await fs.readdir(this.#opts.paths.blocks, 'utf8');
+    } catch (e) {
+      // No blocks directory, that's fine
+    }
+
+    const totals = {
+      sections: files.length,
+      blocks: blockFiles.length,
+    };
+
+    if (spinner) {
+      spinner.text = `Building config and locales...`;
+    }
+
     await this.buildConfig();
     await this.buildLocales();
 
     this.logger.info(`Scanning for schema in ${this.#opts.paths.sections}`);
 
-    if (typeof files === 'undefined' || !files) {
-      files = await fs.readdir(this.#opts.paths.sections, 'utf8');
+    if (spinner) {
+      spinner.text = `Building sections (0/${totals.sections})...`;
     }
 
     // Process sections first
     await Promise.all(files.map(async file => {
       await this.runSection(file);
+      if (spinner) {
+        spinner.text = `Building sections (${this.#counters.sections}/${totals.sections})...`;
+      }
     }))
       .catch(err => {
         this.logger.error(err.message);
       });
 
     // Then process blocks sequentially after sections complete
-    await this.runBlocks();
+    if (totals.blocks > 0 && spinner) {
+      spinner.text = `Building blocks (0/${totals.blocks})...`;
+    }
+    await this.runBlocks(blockFiles, spinner, totals.blocks);
+
+    // Stop spinner before summary
+    if (spinner) {
+      spinner.stop();
+    }
 
     // Print summary if not in verbose mode
     this.printSummary();
