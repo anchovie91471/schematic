@@ -368,12 +368,14 @@ class Schematic {
   }
 
   async buildConfig() {
-    // Use this.#schemaExt in the path and the log message
-    this.logger.info(`Checking for ${this.#opts.paths.schema}/settings_schema.${this.#schemaExt}`);
-
-    const settingsSchema = path.resolve(this.#opts.paths.schema, `settings_schema.${this.#schemaExt}`);
-
-    if (!fs.existsSync(settingsSchema)) {
+    // Resolve settings schema path with extension fallback
+    const settingsSchemaBase = path.resolve(this.#opts.paths.schema, 'settings_schema');
+    let settingsSchema;
+    try {
+      settingsSchema = this.#resolveSchemaPath(settingsSchemaBase, 'settings_schema');
+      this.logger.info(`Found settings schema: ${settingsSchema}`);
+    } catch (err) {
+      // No settings_schema file - this is optional, not an error
       this.logger.debug('No settings schema found');
       return;
     }
@@ -899,15 +901,17 @@ app.run();
       importFilename = filename;
     }
 
-    // Use this.#schemaExt instead of hardcoding ".js"
-    let importFile = path.resolve(this.#opts.paths.themeBlocksSchema, `${importFilename}.${this.#schemaExt}`);
-
-    // doesn't exist, likely schematic options instead
-    if (!fs.existsSync(importFile)) {
+    // Resolve schema path with extension fallback (.cjs, .js, .mjs)
+    const importFileBase = path.resolve(this.#opts.paths.themeBlocksSchema, importFilename);
+    let importFile;
+    try {
+      importFile = this.#resolveSchemaPath(importFileBase, importFilename);
+    } catch {
+      // File not found - likely schematic options instead
       opts = importFilename;
       importFilename = filename;
-      // Again, use this.#schemaExt
-      importFile = path.resolve(this.#opts.paths.themeBlocksSchema, `${importFilename}.${this.#schemaExt}`);
+      const fallbackBase = path.resolve(this.#opts.paths.themeBlocksSchema, importFilename);
+      importFile = this.#resolveSchemaPath(fallbackBase, importFilename);
     }
 
     const schema = await this.compileSchema(importFile, 'block');
@@ -966,15 +970,17 @@ app.run();
       importFilename = filename;
     }
 
-    // Use this.#schemaExt instead of hardcoding ".js"
-    let importFile = path.resolve(this.#opts.paths.schema, `${importFilename}.${this.#schemaExt}`);
-
-    // doesn't exist, likely schematic options instead
-    if (!fs.existsSync(importFile)) {
+    // Resolve schema path with extension fallback (.cjs, .js, .mjs)
+    const importFileBase = path.resolve(this.#opts.paths.schema, importFilename);
+    let importFile;
+    try {
+      importFile = this.#resolveSchemaPath(importFileBase, importFilename);
+    } catch {
+      // File not found - likely schematic options instead
       opts = importFilename;
       importFilename = filename;
-      // Again, use this.#schemaExt
-      importFile = path.resolve(this.#opts.paths.schema, `${importFilename}.${this.#schemaExt}`);
+      const fallbackBase = path.resolve(this.#opts.paths.schema, importFilename);
+      importFile = this.#resolveSchemaPath(fallbackBase, importFilename);
     }
 
     const schema = await this.compileSchema(importFile);

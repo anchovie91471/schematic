@@ -5,8 +5,21 @@ Attempting to be more organized about feature changes between versions.
 - add functions for running single locales, configs, etc
 
 ## Unreleased
+- n/a
 
-### v2.2.4 - ESM Compatibility Fix
+## 2.2.5
+- **Fix:** Complete ESM extension fallback integration
+  - v2.2.4 implemented `#resolveSchemaPath()` but never called it
+  - Schema loading now correctly uses extension fallback in all code paths
+  - Fixed `buildConfig()`, `buildBlockSchema()`, and `buildSchema()` to use the new resolver
+
+### Testing
+- Added integration tests for ESM fallback behavior
+- Tests verify that `.cjs` files are found in ESM projects
+- Tests verify helpful error messages when schema files are missing
+- All 79 tests passing (2 skipped due to Jest dynamic import limitations)
+
+## 2.2.4
 - **Fix:** ESM projects now properly load `.js` schema files with ESM syntax
   - Previously, ESM projects with `.js` files using `export default` would fail with "Cannot find module" errors
   - Schematic now correctly detects ESM projects and loads `.js` files using dynamic `import()`
@@ -25,9 +38,8 @@ Attempting to be more organized about feature changes between versions.
   - All callers already await the result
   - No breaking changes for external users
 
-### Testing
+### Testing (v2.2.4)
 - Added ESM loading tests with `.cjs` support verification
-- All 76 tests passing (2 skipped due to Jest dynamic import limitations)
 
 ## 2.2.3
 - **Feature:** Progress spinner during build

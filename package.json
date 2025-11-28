@@ -1,6 +1,6 @@
 {
   "name": "@anchovie/schematic",
-  "version": "2.2.4",
+  "version": "2.2.5",
   "description": "Write Shopify schema with JS, not JSON.",
   "keywords": [
     "shopify",
