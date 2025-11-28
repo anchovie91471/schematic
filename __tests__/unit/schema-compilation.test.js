@@ -19,9 +19,9 @@ describe('Schema Compilation', () => {
     });
   });
 
-  test('compileSchema should load and return valid schema', () => {
+  test('compileSchema should load and return valid schema', async () => {
     const schemaPath = path.resolve('./__tests__/fixtures/schema/test-section.js');
-    const schema = schematic.compileSchema(schemaPath);
+    const schema = await schematic.compileSchema(schemaPath);
 
     expect(schema).toBeDefined();
     expect(schema.name).toBe('Test Section');
@@ -29,17 +29,17 @@ describe('Schema Compilation', () => {
     expect(schema.settings[0].id).toBe('heading');
   });
 
-  test('compileSchema should handle section type correctly', () => {
+  test('compileSchema should handle section type correctly', async () => {
     const schemaPath = path.resolve('./__tests__/fixtures/schema/test-section.js');
-    const schema = schematic.compileSchema(schemaPath, 'section');
+    const schema = await schematic.compileSchema(schemaPath, 'section');
 
     expect(schema.enabled_on).toBeDefined();
     expect(schema.enabled_on.templates).toContain('index');
   });
 
-  test('compileSchema should handle block type correctly', () => {
+  test('compileSchema should handle block type correctly', async () => {
     const schemaPath = path.resolve('./__tests__/fixtures/schema/theme-blocks/test-block.js');
-    const schema = schematic.compileSchema(schemaPath, 'block');
+    const schema = await schematic.compileSchema(schemaPath, 'block');
 
     expect(schema).toBeDefined();
     expect(schema.name).toBe('Test Block');

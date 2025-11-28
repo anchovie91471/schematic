@@ -25,43 +25,50 @@ function parseFlags(args) {
   return { flags, positional };
 }
 
-const app = new Schematic();
-app.envDefaults(); // looks at env vars to determine opts
+// Main async entry point - properly awaits all async methods
+(async () => {
+  const app = new Schematic();
+  app.envDefaults(); // looks at env vars to determine opts
 
-// Parse command line arguments
-const args = process.argv.slice(2);
-const { flags, positional } = parseFlags(args);
-const [ command, arg ] = positional;
+  // Parse command line arguments
+  const args = process.argv.slice(2);
+  const { flags, positional } = parseFlags(args);
+  const [ command, arg ] = positional;
 
-if (command) {
-  if (command === 'scaffold') {
-    if (!arg) app.exit(`scaffold requires a filename [section-name]`);
+  try {
+    if (command) {
+      if (command === 'scaffold') {
+        if (!arg) app.exit(`scaffold requires a filename [section-name]`);
 
-    const short = flags.short || flags.s || false;
-    const blockOnly = flags.block || flags.b || false;
+        const short = flags.short || flags.s || false;
+        const blockOnly = flags.block || flags.b || false;
 
-    // Validate flag combinations
-    if (short && blockOnly) {
-      app.logger.error('--short and --block flags cannot be used together');
-      console.log('  --short applies to sections only');
-      process.exit(1);
+        // Validate flag combinations
+        if (short && blockOnly) {
+          app.logger.error('--short and --block flags cannot be used together');
+          console.log('  --short applies to sections only');
+          process.exit(1);
+        }
+
+        await app.scaffold(arg, short, blockOnly);
+      }
+
+      else if (command === 'section') {
+        if (!arg) app.exit(`section requires a file path`);
+
+        await app.runSection(arg);
+      }
+
+      else if (command === 'init') {
+        const filename = arg || 'schematic';  // Default to 'schematic' if no name provided
+        await app.init(filename);
+      }
+
+      else app.exit(`command not recognized`);
     }
 
-    app.scaffold(arg, short, blockOnly);
+    else await app.run();
+  } catch (err) {
+    app.exit(err.message);
   }
-
-  else if (command === 'section') {
-    if (!arg) app.exit(`section requires a file path`);
-
-    app.runSection(arg);
-  }
-
-  else if (command === 'init') {
-    const filename = arg || 'schematic';  // Default to 'schematic' if no name provided
-    app.init(filename);
-  }
-
-  else app.exit(`command not recognized`);
-}
-
-else app.run();
+})();

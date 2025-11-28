@@ -5,7 +5,29 @@ Attempting to be more organized about feature changes between versions.
 - add functions for running single locales, configs, etc
 
 ## Unreleased
-- n/a
+
+### v2.2.4 - ESM Compatibility Fix
+- **Fix:** ESM projects now properly load `.js` schema files with ESM syntax
+  - Previously, ESM projects with `.js` files using `export default` would fail with "Cannot find module" errors
+  - Schematic now correctly detects ESM projects and loads `.js` files using dynamic `import()`
+  - Full support for `.cjs`, `.js`, and `.mjs` schema file extensions
+  - Automatic fallback: In ESM projects, tries `.cjs` first, then `.js`, then `.mjs`
+  - In CommonJS projects, tries `.js` first, then `.cjs`, then `.mjs`
+- **Fix:** CLI now properly awaits all async methods
+  - Previously, async methods like `run()`, `scaffold()`, `init()`, `runSection()` were called without awaiting
+  - This could cause silent failures or incomplete execution
+  - CLI is now wrapped in async IIFE with proper error handling
+- **Enhancement:** Improved error messages for missing schema files
+  - Lists all searched paths when a schema file isn't found
+  - Provides helpful hints for ESM projects explaining file extension options
+  - Error message includes: "Hint: In ESM projects, schema files can be: .cjs (recommended), .js (ESM with export default), or .mjs"
+- **Internal:** `compileSchema()` is now async to support dynamic imports
+  - All callers already await the result
+  - No breaking changes for external users
+
+### Testing
+- Added ESM loading tests with `.cjs` support verification
+- All 76 tests passing (2 skipped due to Jest dynamic import limitations)
 
 ## 2.2.3
 - **Feature:** Progress spinner during build

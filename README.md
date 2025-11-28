@@ -72,13 +72,11 @@ Schematic works with both **CommonJS** and **ES6 module** theme projects.
 
 Schematic automatically detects your project's module system by checking your theme's `package.json`:
 
-| Your Theme Setup | Schema File Extension | Schema File Format |
-|-----------------|----------------------|-------------------|
-| No `"type"` field | `.js` | CommonJS (`module.exports`) |
-| `"type": "commonjs"` | `.js` | CommonJS (`module.exports`) |
-| `"type": "module"` | `.cjs` | CommonJS (`module.exports`) |
-
-**Important:** Regardless of your theme's module system, **all schema files must use CommonJS syntax** (`module.exports` and `require()`). This is because Schematic itself is a CommonJS package.
+| Your Theme Setup | Supported Extensions | Recommended Format |
+|-----------------|---------------------|-------------------|
+| No `"type"` field | `.js`, `.cjs`, `.mjs` | CommonJS (`.js` with `module.exports`) |
+| `"type": "commonjs"` | `.js`, `.cjs`, `.mjs` | CommonJS (`.js` with `module.exports`) |
+| `"type": "module"` | `.cjs`, `.js`, `.mjs` | CommonJS (`.cjs` with `module.exports`) |
 
 **Note:** If you create a custom executable with `npx schematic init`, the generated file will automatically use the appropriate syntax for your project:
 - **ES6 module projects** (`"type": "module"`): Uses `import { Schematic } from '@anchovie/schematic'`
@@ -86,10 +84,11 @@ Schematic automatically detects your project's module system by checking your th
 
 ### For ES6 Module Projects
 
-If your Shopify theme has `"type": "module"` in its `package.json`, you must name your schema files with the `.cjs` extension:
+If your Shopify theme has `"type": "module"` in its `package.json`, you have two options:
 
+**Option 1: Use `.cjs` files (Recommended)**
 ```javascript
-// ✅ Correct: src/schema/mySection.cjs
+// src/schema/mySection.cjs
 const { app } = require('@anchovie/schematic');
 
 module.exports = {
@@ -98,16 +97,45 @@ module.exports = {
 };
 ```
 
+**Option 2: Use `.js` files with ESM syntax**
 ```javascript
-// ❌ Wrong: src/schema/mySection.js (in ES6 module project)
-// This won't work because Node.js will try to parse it as an ES6 module
+// src/schema/mySection.js
 export default {
-  ...app.section('My Section'),
+  name: 'My Section',
+  presets: [{ name: 'My Section' }],
   settings: [],
 };
 ```
 
-**Why `.cjs`?** When a project declares `"type": "module"`, Node.js treats all `.js` files as ES6 modules. The `.cjs` extension explicitly tells Node.js to treat the file as CommonJS, allowing Schematic's `require()` to load it properly.
+**Note:** When using ESM syntax (`.js` or `.mjs`), you cannot use Schematic helpers like `app.section()` because `@anchovie/schematic` is a CommonJS package. For full helper support, use `.cjs` files.
+
+### Extension Fallback Order
+
+Schematic tries extensions in this order:
+
+| Project Type | Fallback Order |
+|--------------|---------------|
+| ESM (`"type": "module"`) | `.cjs` → `.js` → `.mjs` |
+| CommonJS | `.js` → `.cjs` → `.mjs` |
+
+This means if you're migrating an ESM project with existing `.js` files, Schematic will still find them even if it prefers `.cjs`.
+
+### Helpful Error Messages
+
+If a schema file isn't found, Schematic provides helpful error messages:
+```
+Schema file not found for "my-section"
+
+Searched paths:
+  - /path/to/src/schema/my-section.cjs
+  - /path/to/src/schema/my-section.js
+  - /path/to/src/schema/my-section.mjs
+
+Hint: In ESM projects (type: module), schema files can be:
+  - .cjs (CommonJS - recommended)
+  - .js (ESM with export default)
+  - .mjs (ESM)
+```
 
 **Good news:** When you run `schematic scaffold <name>`, Schematic automatically creates schema files with the correct extension for your project type.
 

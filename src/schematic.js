@@ -1,5 +1,6 @@
 const fs = require('fs-extra');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const chalk = require('chalk');
 const { Logger } = require('./logger.js');
 
@@ -39,6 +40,9 @@ class Schematic {
   // New field to store which extension to use
   #schemaExt = 'js';
 
+  // Track if the project is using ES modules
+  #isESM = false;
+
   // Logger instance
   logger = null;
 
@@ -60,15 +64,16 @@ class Schematic {
     // Initialize logger
     this.logger = new Logger(this.#opts.verbose);
 
-    // Check package.json for "type"
+    // Check package.json for "type" to detect ESM projects
     try {
       const pkgPath = path.resolve(process.cwd(), 'package.json');
       const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
       if (pkg.type === 'module') {
         this.#schemaExt = 'cjs';
+        this.#isESM = true;
       }
     } catch {
-      // fallback to 'js'
+      // fallback to CommonJS defaults
     }
   }
 
@@ -83,6 +88,72 @@ class Schematic {
     if (process.env.SCHEMATIC_PATH_BLOCKS) this.#opts.paths.blocks = String(process.env.SCHEMATIC_PATH_BLOCKS).trim();
     if (process.env.SCHEMATIC_PATH_SCHEMA) this.#opts.paths.schema = String(process.env.SCHEMATIC_PATH_SCHEMA).trim();
     if (process.env.SCHEMATIC_PATH_THEME_BLOCKS_SCHEMA) this.#opts.paths.themeBlocksSchema = String(process.env.SCHEMATIC_PATH_THEME_BLOCKS_SCHEMA).trim();
+  }
+
+  /**
+   * Resolve schema file path with extension fallback
+   * In ESM projects, prefers .cjs, then falls back to .js/.mjs
+   * In CommonJS projects, prefers .js, then falls back to .cjs/.mjs
+   * @param {string} basePath - Path without extension
+   * @param {string} sectionName - For error messages
+   * @returns {string} - Resolved path
+   * @throws {Error} - If no matching file found
+   */
+  #resolveSchemaPath(basePath, sectionName) {
+    const extensions = this.#isESM
+      ? ['.cjs', '.js', '.mjs']  // ESM: prefer .cjs, fallback to .js/.mjs
+      : ['.js', '.cjs', '.mjs']; // CommonJS: prefer .js, fallback to others
+
+    const searchedPaths = [];
+    for (const ext of extensions) {
+      const fullPath = basePath + ext;
+      searchedPaths.push(fullPath);
+      if (fs.existsSync(fullPath)) {
+        return fullPath;
+      }
+    }
+
+    // Build helpful error message
+    const pathList = searchedPaths.map(p => `  - ${p}`).join('\n');
+    let hint = '';
+    if (this.#isESM) {
+      hint = `\n\nHint: In ESM projects (type: module), schema files can be:
+  - .cjs (CommonJS - recommended)
+  - .js (ESM with export default)
+  - .mjs (ESM)`;
+    }
+
+    throw new Error(`Schema file not found for "${sectionName}"\n\nSearched paths:\n${pathList}${hint}`);
+  }
+
+  /**
+   * Load a schema file, supporting both CommonJS and ESM
+   * @param {string} filePath - Absolute path to schema file
+   * @returns {Promise<object>} - The schema object
+   */
+  async #loadSchemaFile(filePath) {
+    const ext = path.extname(filePath);
+
+    // .cjs files are always CommonJS - use require
+    if (ext === '.cjs') {
+      return require(filePath);
+    }
+
+    // .mjs files are always ESM - use import
+    if (ext === '.mjs') {
+      const module = await import(pathToFileURL(filePath));
+      return module.default || module;
+    }
+
+    // .js files depend on project type
+    if (this.#isESM) {
+      // In ESM projects, .js files are ESM - use import
+      const module = await import(pathToFileURL(filePath));
+      return module.default || module;
+    } else {
+      // In CommonJS projects, .js files are CommonJS - use require
+      return require(filePath);
+    }
   }
 
   out(v, error) {
@@ -270,13 +341,14 @@ class Schematic {
 
     this.logger.info('Generating locales...');
 
-    fs.readdirSync(localePath).forEach(sourceFile => {
+    const sourceFiles = fs.readdirSync(localePath);
+    for (const sourceFile of sourceFiles) {
       // Replace `.${this.#schemaExt}` with `.json`
       const localeFilename = sourceFile.replace(`.${this.#schemaExt}`, '.json');
       const sourceLocalePath = path.resolve(localePath, sourceFile);
       const targetLocalePath = path.resolve(this.#opts.paths.locales, localeFilename);
 
-      const schema = this.compileSchema(sourceLocalePath, 'locale');
+      const schema = await this.compileSchema(sourceLocalePath, 'locale');
 
       if (schema) {
         try {
@@ -287,10 +359,10 @@ class Schematic {
         }
         catch(err) {
           this.logger.error(`Error writing ${localeFilename}: ${err.message}`);
-          return;
+          continue;
         }
       }
-    });
+    }
 
     return this.writeLocalization();
   }
@@ -308,7 +380,7 @@ class Schematic {
 
     this.logger.info('Generating settings schema...');
 
-    const schema = this.compileSchema(settingsSchema, 'schema');
+    const schema = await this.compileSchema(settingsSchema, 'schema');
 
     if (schema) {
       try {
@@ -695,11 +767,11 @@ app.run();
     this.printSummary();
   }
 
-  compileSchema(file, type = 'section') {
+  async compileSchema(file, type = 'section') {
     let schema;
 
     try {
-      schema = require(file);
+      schema = await this.#loadSchemaFile(file);
     }
     catch(err) {
       this.logger.schemaError(
@@ -713,7 +785,7 @@ app.run();
     if (typeof schema !== 'object') {
       this.logger.schemaError(
         file,
-        'Schema must export a JavaScript object using module.exports',
+        'Schema must export a JavaScript object using module.exports or export default',
         'Schema compilation'
       );
       return false;
@@ -838,7 +910,7 @@ app.run();
       importFile = path.resolve(this.#opts.paths.themeBlocksSchema, `${importFilename}.${this.#schemaExt}`);
     }
 
-    const schema = this.compileSchema(importFile, 'block');
+    const schema = await this.compileSchema(importFile, 'block');
 
     if (schema === false) {
       return this.logger.error('Error compiling schema, abandoning');
@@ -905,7 +977,7 @@ app.run();
       importFile = path.resolve(this.#opts.paths.schema, `${importFilename}.${this.#schemaExt}`);
     }
 
-    const schema = this.compileSchema(importFile);
+    const schema = await this.compileSchema(importFile);
 
     if (schema === false) {
       return this.logger.error('Error compiling schema, abandoning');
