@@ -22,13 +22,12 @@ npx schematic
 
 ### Using npm Scripts (Recommended for Teams)
 
-For consistent team workflows, add Schematic commands to your theme's `package.json`:
+For consistent team workflows, add a Schematic command to your theme's `package.json`:
 
 ```json
 {
   "scripts": {
-    "schema": "schematic",
-    "schema:watch": "schematic watch"
+    "schema": "schematic"
   }
 }
 ```
@@ -42,7 +41,6 @@ npm run schema
 
 - Consistent commands across the team
 - Easy to integrate with other build tools
-- Can chain with Shopify CLI: `"dev": "shopify theme dev & npm run schema:watch"`
 
 ### Configuration
 

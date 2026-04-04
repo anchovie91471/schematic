@@ -64,7 +64,7 @@ function parseFlags(args) {
         await app.init(filename);
       }
 
-      else app.exit(`command not recognized`);
+      else app.exit(`command not recognized: "${command}". Valid commands are: scaffold, section, init`);
     }
 
     else await app.run();
