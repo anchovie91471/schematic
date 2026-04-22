@@ -8,3 +8,7 @@ CLAUDE.md
 __tests__
 coverage
 .claude
+# Maintainer-internal planning & memory — never ship to npm consumers
+docs/
+.context/
+.plans/

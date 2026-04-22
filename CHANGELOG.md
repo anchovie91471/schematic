@@ -1,11 +1,15 @@
 # Changelog
 Attempting to be more organized about feature changes between versions.
 
-## TODO
-- add functions for running single locales, configs, etc
-
 ## Unreleased
 - n/a
+
+## 2.2.8
+- **Fix:** Exclude `docs/`, `.context/`, and `.plans/` directories from the npm tarball
+  - Previously, `docs/` (internal maintainer planning — `SCHEMATIC_IDEAS_BACKLOG.md`, `SCHEMATIC_MODERNIZATION_ROADMAP_v2.md`, testing notes) was shipping to every npm consumer, inflating `node_modules` with ~124 KB of internal-only planning documents
+  - `.context/` and `.plans/` were excluded by npm's default dot-prefix behavior, but now explicit in `.npmignore` for resilience
+  - **Effect:** published tarball size dropped from ~118 KB to ~27 KB (77% smaller); unpacked size ~422 KB → ~97 KB; file count 35 → 11
+  - No code changes; no behavior changes. Purely a packaging hygiene fix.
 
 ## 2.2.7
 - **Perf:** Eliminated catastrophic regex backtracking in `writeCode()` and `writeCodeShort()`
