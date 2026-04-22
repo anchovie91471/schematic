@@ -7,6 +7,32 @@ Attempting to be more organized about feature changes between versions.
 ## Unreleased
 - n/a
 
+## 2.2.7
+- **Perf:** Eliminated catastrophic regex backtracking in `writeCode()` and `writeCodeShort()`
+  - The `{% comment %} schematic` marker-matching regex used greedy `([.\s\S]*)` + multiline retry + literal delimiter tail, causing O(n²) backtracking per liquid file
+  - CPU profile showed 99.3% of total execution time spent inside this single regex on real-world themes
+  - Replaced with an O(n) helper (`#replaceUpToLastMarker`) that preserves exact original semantics (matches the LAST occurrence of the marker)
+  - **Measured speedup on production themes:** fullbucket-slayed 12,765ms → 71ms (178.7×), 6666s-theme 4,971ms → 69ms (71.7×), vast-shopify-theme 35ms → 33ms (1.1×, no regression)
+  - Validated byte-identical output across 562 files in three production themes and 8 synthetic edge cases (marker position, case variants, whitespace variants, multi-marker, zero marker, empty string, raw-block interaction). Zero mismatches.
+- **Fix:** `SCHEMATIC_VERBOSE` environment variable now actually works
+  - Previously, setting `SCHEMATIC_VERBOSE=true` produced zero log output
+  - Root cause: the Logger was instantiated in the `Schematic` constructor before `envDefaults()` ran, so it captured the default `verbose: false`. Later `envDefaults()` would flip the internal opt but the Logger's snapshot was already stale
+  - Added `Logger.prototype.setVerbose(bool)` and call it from `envDefaults()` after reading the env var
+  - Env var accepted values unchanged: `true`/`false`/`1`/`0`
+
+### Testing
+- Added edge-case coverage in `write-code.test.js` for marker-matching semantics (no marker, empty string, marker at start/end/middle, multi-marker, case variants, whitespace variants)
+- Added performance regression guard: `writeCode` on a >400KB liquid file must complete in <50ms
+- Added `setVerbose()` tests in `logger.test.js`
+- New `verbose-env.test.js` covering the `Schematic` + `envDefaults()` integration for all six env-var scenarios
+- 99 tests passing (was 79), 2 skipped (pre-existing Jest dynamic-import limitations)
+
+### Non-breaking
+- Zero behavior changes on any valid input. Both fixes are semantic-preserving — liquid file output is byte-identical to v2.2.6 on every input tested.
+
+## 2.2.6
+- Documentation and error-message improvements (released 2026-04-04 via PRs #3, #4). This entry is a placeholder — the release predates this changelog's reorganization; see [GitHub release v2.2.6](https://github.com/anchovie91471/schematic/releases/tag/v2.2.6) for the full details.
+
 ## 2.2.5
 - **Fix:** Complete ESM extension fallback integration
   - v2.2.4 implemented `#resolveSchemaPath()` but never called it

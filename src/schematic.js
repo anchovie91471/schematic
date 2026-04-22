@@ -82,6 +82,11 @@ class Schematic {
     else if ([false, 'false', 0, '0'].includes(process.env.SCHEMATIC_VERBOSE)) this.#opts.verbose = false;
     // If env var not set, keep constructor default (verbose: false)
 
+    // Sync the Logger's verbose flag with the (possibly-updated) opts. The Logger was
+    // instantiated in the constructor before this method ran, so without this call
+    // SCHEMATIC_VERBOSE=true would silently no-op. (Fixed in 2.2.6.)
+    this.logger.setVerbose(this.#opts.verbose);
+
     if (process.env.SCHEMATIC_PATH_CONFIG) this.#opts.paths.config = String(process.env.SCHEMATIC_PATH_CONFIG).trim();
     if (process.env.SCHEMATIC_PATH_SECTIONS) this.#opts.paths.sections = String(process.env.SCHEMATIC_PATH_SECTIONS).trim();
     if (process.env.SCHEMATIC_PATH_SNIPPETS) this.#opts.paths.snippets = String(process.env.SCHEMATIC_PATH_SNIPPETS).trim();
@@ -1061,14 +1066,26 @@ ${rendered}
 -%}
 {%- comment -%} schematic`;
 
-    return contents.replace(/^([.\s\S]*){%\-?\s*comment\s*\-?%}\s*schematic/mgi, code);
+    return this.#replaceUpToLastMarker(contents, code);
   }
 
   writeCodeShort(contents, importFilename, schema) {
     const code = `{%- render '${importFilename}' with section as section -%}
 
 {%- comment -%} schematic`;
-    return contents.replace(/^([.\s\S]*){%\-?\s*comment\s*\-?%}\s*schematic/mgi, code);
+    return this.#replaceUpToLastMarker(contents, code);
+  }
+
+  // Replace everything up to and including the LAST `{% comment %} schematic` marker.
+  // Preserves the original greedy-regex semantics (match-last-occurrence) but runs in O(n)
+  // instead of O(n^2) catastrophic backtracking. See .plans/2026-04-22-v2.2.6-perf-and-verbose-fix.md
+  #replaceUpToLastMarker(contents, code) {
+    let lastEnd = -1;
+    for (const m of contents.matchAll(/{%-?\s*comment\s*-?%}\s*schematic/gi)) {
+      lastEnd = m.index + m[0].length;
+    }
+    if (lastEnd === -1) return contents;
+    return code + contents.slice(lastEnd);
   }
 };
 

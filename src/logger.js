@@ -7,6 +7,10 @@ class Logger {
     this.useColor = !process.env.NO_COLOR && !!process.stdout.isTTY;
   }
 
+  setVerbose(verbose) {
+    this.verbose = verbose;
+  }
+
   info(msg) {
     if (this.verbose) {
       const icon = this.useColor ? chalk.blue('ℹ') : 'ℹ';

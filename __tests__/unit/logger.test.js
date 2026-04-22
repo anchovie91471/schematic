@@ -117,4 +117,43 @@ describe('Logger', () => {
     verboseLogger.warn('Warning message');
     expect(consoleSpy).toHaveBeenCalled();
   });
+
+  // Added in 2.2.6 — setVerbose lets callers flip the verbose flag after construction.
+  // Schematic.envDefaults() uses this to honor SCHEMATIC_VERBOSE (previously a silent no-op).
+  describe('setVerbose', () => {
+    it('flips verbose flag from false to true', () => {
+      const l = new Logger(false);
+      expect(l.verbose).toBe(false);
+      l.setVerbose(true);
+      expect(l.verbose).toBe(true);
+    });
+
+    it('flips verbose flag from true to false', () => {
+      const l = new Logger(true);
+      expect(l.verbose).toBe(true);
+      l.setVerbose(false);
+      expect(l.verbose).toBe(false);
+    });
+
+    it('makes previously-silent info() actually log after setVerbose(true)', () => {
+      const l = new Logger(false);
+      l.info('before setVerbose');
+      expect(consoleSpy).not.toHaveBeenCalled();
+
+      l.setVerbose(true);
+      l.info('after setVerbose');
+      expect(consoleSpy).toHaveBeenCalled();
+    });
+
+    it('makes previously-logging info() silent after setVerbose(false)', () => {
+      const l = new Logger(true);
+      l.info('before setVerbose');
+      expect(consoleSpy).toHaveBeenCalled();
+
+      consoleSpy.mockClear();
+      l.setVerbose(false);
+      l.info('after setVerbose');
+      expect(consoleSpy).not.toHaveBeenCalled();
+    });
+  });
 });
