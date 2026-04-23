@@ -1,6 +1,6 @@
 {
   "name": "@anchovie/schematic",
-  "version": "2.2.8",
+  "version": "2.2.9",
   "description": "Write Shopify schema with JS, not JSON.",
   "keywords": [
     "shopify",
@@ -37,6 +37,9 @@
     "url": "https://github.com/anchovie91471/schematic/issues"
   },
   "homepage": "https://github.com/anchovie91471/schematic#readme",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "devDependencies": {
     "jest": "^30.2.0"
   },

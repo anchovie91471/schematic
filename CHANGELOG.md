@@ -4,6 +4,28 @@ Attempting to be more organized about feature changes between versions.
 ## Unreleased
 - n/a
 
+## 2.2.9
+- **Fix:** Added `engines.node >=20.0.0` to `package.json` to declare the real Node floor
+  - The `ora@^9.0.0` dependency has required Node 20+ since it was upgraded, but with no `engines` field on the package itself, users on older Node got a runtime crash on `require('ora')` instead of a clean install-time warning from npm
+  - No runtime behavior change for users already on Node 20+ (CI uses Node 20)
+  - Added `__tests__/unit/package-metadata.test.js` to guard against accidental removal
+- **Enhancement:** Write-skip applied to every file-writing path — `runSection`, `runBlock`, `buildConfig`, `buildLocales` (locale JSON output), and `writeLocalization` (localization snippet)
+  - Each write path now reads the existing file contents first; if what it would write is byte-identical, the write is skipped entirely
+  - Prevents Shopify CLI upload storms: previously, every `npm run build` bumped the mtime on every `.liquid` file, `settings_schema.json`, every locale JSON, and the localization snippet — triggering theme re-uploads for files that hadn't actually changed. Now only genuinely modified files are re-uploaded
+  - The counters tracked by `printSummary()` (sections, blocks, settings, locales) only increment on actual writes. When everything is up to date, the summary reads `Schematic ran: no files changed` instead of remaining silent (the `items.length > 0` branch previously printed nothing on a no-op run)
+  - Zero change to compiled output bytes on disk; only affects when writes happen and which summary message prints
+  - Added `__tests__/unit/write-skip.test.js` with 10 tests covering all five write paths and both summary branches
+- **Testing:** Added `__tests__/unit/fuzz-write-code.test.js` — a fuzz harness for the marker-matching regex in `writeCode()` / `writeCodeShort()` (no production code change)
+  - 17 tests across four categories: adversarial-shape performance guards (1MB inputs with 10,000 near-miss prefixes, 500 scattered valid markers, heavy interior whitespace — each asserting `<100ms` to catch any future reintroduction of the O(n²) backtracking fixed in v2.2.7), correctness invariants (no-marker passthrough, post-last-marker preservation, marker re-processability, multi-marker collapse, case insensitivity), 200-iteration random-combination cross-checks against an independent `.match()`-based reference implementation, and edge cases (empty string, bare-marker, marker at start/end)
+  - The cross-check uses a deterministic PRNG so failures are reproducible
+- **Validation:** Detect duplicate block `type` or duplicate block `name` within a section's `blocks[]` at compile time
+  - Mirrors Shopify's own hard-error rule ([Section schema docs](https://shopify.dev/docs/storefronts/themes/architecture/sections/section-schema)): *"All block names and types must be unique within each section... Having duplicates will result in an error."* Schematic now catches this before upload instead of failing silently in the theme editor
+  - Error format matches the existing v2.2.1 duplicate-setting-ID reporter (first occurrence position, duplicate position, kind-specific tip)
+  - Blocks without an explicit `type` or `name` are skipped for the respective check (doesn't flag undefined-vs-undefined as a duplicate)
+  - New `validateUniqueBlockAttributes(blocks, file)` method on the `Schematic` class, called from the schema compile path after per-block settings validation
+  - 8 new tests in `__tests__/unit/duplicate-detection.test.js` covering duplicate type, duplicate name, both kinds together, all-unique pass, absent-attribute handling, empty/single-block arrays, and multi-position detection
+  - Strictly additive — only rejects schemas Shopify itself would reject. No false positives on legitimately valid themes
+
 ## 2.2.8
 - **Fix:** Exclude `docs/`, `.context/`, and `.plans/` directories from the npm tarball
   - Previously, `docs/` (internal maintainer planning — `SCHEMATIC_IDEAS_BACKLOG.md`, `SCHEMATIC_MODERNIZATION_ROADMAP_v2.md`, testing notes) was shipping to every npm consumer, inflating `node_modules` with ~124 KB of internal-only planning documents

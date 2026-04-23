@@ -198,6 +198,11 @@ class Schematic {
       const text = this.logger.useColor ? chalk.green(`Schematic generated: ${items.join(', ')}`) : `Schematic generated: ${items.join(', ')}`;
       console.log(icon, text);
     }
+    else {
+      const icon = this.logger.useColor ? chalk.green('✓') : '✓';
+      const text = this.logger.useColor ? chalk.green('Schematic ran: no files changed') : 'Schematic ran: no files changed';
+      console.log(icon, text);
+    }
   }
 
   async preCheck() {
@@ -327,8 +332,13 @@ class Schematic {
         newContents = contents.replace(new RegExp(replaceLocalizationCommentEx, 'mis'), comment + `\n` + localeExpr);
       }
 
-      await fs.writeFile(localizationFile, newContents);
-      this.logger.success('Localization written');
+      if (newContents === contents) {
+        this.logger.debug(`${this.relativePath(localizationFile)}: unchanged, skipping write`);
+      }
+      else {
+        await fs.writeFile(localizationFile, newContents);
+        this.logger.success('Localization written');
+      }
     }
     catch(err) {
       this.logger.error(`Couldn't write localization: ${err.message}`);
@@ -358,9 +368,21 @@ class Schematic {
       if (schema) {
         try {
           const parsed = JSON.stringify(schema, null, 2);
-          fs.writeFileSync(targetLocalePath, parsed);
-          this.logger.success(`✓ ${localeFilename}`);
-          this.#counters.locales++;
+
+          let existing = null;
+          try {
+            existing = fs.readFileSync(targetLocalePath, 'utf8');
+          }
+          catch { /* file doesn't exist yet; fall through to write */ }
+
+          if (existing === parsed) {
+            this.logger.debug(`${this.relativePath(targetLocalePath)}: unchanged, skipping write`);
+          }
+          else {
+            fs.writeFileSync(targetLocalePath, parsed);
+            this.logger.success(`✓ ${localeFilename}`);
+            this.#counters.locales++;
+          }
         }
         catch(err) {
           this.logger.error(`Error writing ${localeFilename}: ${err.message}`);
@@ -390,17 +412,29 @@ class Schematic {
     const schema = await this.compileSchema(settingsSchema, 'schema');
 
     if (schema) {
+      const targetPath = path.resolve(this.#opts.paths.config, 'settings_schema.json');
+
       try {
         const parsed = JSON.stringify(schema, null, 2);
 
-        await fs.writeFile(path.resolve(this.#opts.paths.config, 'settings_schema.json'), parsed);
+        let existing = null;
+        try {
+          existing = await fs.readFile(targetPath, 'utf8');
+        }
+        catch { /* file doesn't exist yet; fall through to write */ }
+
+        if (existing === parsed) {
+          this.logger.debug(`${this.relativePath(targetPath)}: unchanged, skipping write`);
+        }
+        else {
+          await fs.writeFile(targetPath, parsed);
+          this.logger.success('✓ settings_schema.json');
+          this.#counters.settings++;
+        }
       }
       catch(err) {
         return this.logger.error(`Error writing settings_schema.json: ${err.message}`);
       }
-
-      this.logger.success('✓ settings_schema.json');
-      this.#counters.settings++;
     }
   }
 
@@ -627,8 +661,13 @@ app.run();
         const newContents = await this.buildBlockSchema(floc, contents);
 
         if (newContents) {
-          await fs.writeFile(floc, newContents);
-          this.#counters.blocks++;
+          if (newContents === contents) {
+            this.logger.debug(`${this.relativePath(floc)}: unchanged, skipping write`);
+          }
+          else {
+            await fs.writeFile(floc, newContents);
+            this.#counters.blocks++;
+          }
         }
         else {
           this.logger.error(`${this.relativePath(floc)}: new contents failed`);
@@ -667,8 +706,13 @@ app.run();
         const newContents = await this.buildSchema(floc, contents);
 
         if (newContents) {
-          await fs.writeFile(floc, newContents);
-          this.#counters.sections++;
+          if (newContents === contents) {
+            this.logger.debug(`${this.relativePath(floc)}: unchanged, skipping write`);
+          }
+          else {
+            await fs.writeFile(floc, newContents);
+            this.#counters.sections++;
+          }
         }
         else {
           this.logger.error(`${this.relativePath(floc)}: new contents failed`);
@@ -806,8 +850,13 @@ app.run();
       }
     }
 
-    // Validate unique IDs in each block's settings
+    // Validate unique block type/name across blocks, then unique IDs in each block's settings
     if (schema.blocks) {
+      const blockValidation = this.validateUniqueBlockAttributes(schema.blocks, file);
+      if (!blockValidation.valid) {
+        return false;
+      }
+
       for (let i = 0; i < schema.blocks.length; i++) {
         const block = schema.blocks[i];
         if (block.settings) {
@@ -873,6 +922,73 @@ app.run();
 
       console.log(yellow('💡 Tip:'), 'Each setting ID must be unique within its scope');
       console.log(gray('   Rename one of the duplicate IDs to fix this error.'));
+      console.log();
+
+      return { valid: false, duplicates };
+    }
+
+    return { valid: true, duplicates: [] };
+  }
+
+  // Shopify rejects sections whose blocks[] has duplicate `type` or duplicate `name`.
+  // See https://shopify.dev/docs/storefronts/themes/architecture/sections/section-schema
+  // Blocks without an explicit type/name are skipped for the respective check.
+  validateUniqueBlockAttributes(blocks, file) {
+    const byType = new Map();
+    const byName = new Map();
+    const duplicates = [];
+
+    blocks.forEach((block, index) => {
+      if (block.type) {
+        if (byType.has(block.type)) {
+          duplicates.push({
+            kind: 'type',
+            value: block.type,
+            firstPosition: byType.get(block.type) + 1,
+            duplicatePosition: index + 1
+          });
+        }
+        else {
+          byType.set(block.type, index);
+        }
+      }
+
+      if (block.name) {
+        if (byName.has(block.name)) {
+          duplicates.push({
+            kind: 'name',
+            value: block.name,
+            firstPosition: byName.get(block.name) + 1,
+            duplicatePosition: index + 1
+          });
+        }
+        else {
+          byName.set(block.name, index);
+        }
+      }
+    });
+
+    if (duplicates.length > 0) {
+      const kinds = [...new Set(duplicates.map(d => d.kind))].join(' / ');
+      this.logger.error(`Duplicate block ${kinds} found in section blocks`);
+      console.log(this.logger.useColor ? chalk.gray(`   File: ${file}`) : `   File: ${file}`);
+      console.log();
+
+      duplicates.forEach(dup => {
+        const red = this.logger.useColor ? chalk.red : (str) => str;
+        const gray = this.logger.useColor ? chalk.gray : (str) => str;
+
+        console.log(red(`   ✗ block ${dup.kind} "${dup.value}"`));
+        console.log(gray(`     First occurrence: position ${dup.firstPosition}`));
+        console.log(gray(`     Duplicate: position ${dup.duplicatePosition}`));
+        console.log();
+      });
+
+      const yellow = this.logger.useColor ? chalk.yellow : (str) => str;
+      const gray = this.logger.useColor ? chalk.gray : (str) => str;
+
+      console.log(yellow('💡 Tip:'), 'Each block type and name must be unique within a section');
+      console.log(gray('   Shopify rejects sections with duplicate block types or names.'));
       console.log();
 
       return { valid: false, duplicates };
