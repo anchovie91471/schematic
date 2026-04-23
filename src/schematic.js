@@ -216,18 +216,11 @@ class Schematic {
     }
 
     if (fails.length) {
-      this.logger.error('Missing required directories');
-      console.log('   Missing:', fails.map(f => f.split(':')[1]).join(', '));
-      console.log();
-      console.log(this.logger.useColor ? chalk.yellow('💡 Tip:') : 'Tip:',
-        'Run this command from your Shopify theme root directory');
-      console.log('   Expected structure:');
-      console.log('   - ./config/');
-      console.log('   - ./sections/');
-      console.log('   - ./snippets/');
-      console.log('   - ./locales/');
-      console.log('   - ./src/schema/');
-      process.exit(1);
+      const missing = fails.map(f => f.split(':')[1]);
+      const err = new Error(`Missing required directories: ${missing.join(', ')}`);
+      err.code = 'MISSING_DIRECTORIES';
+      err.missing = missing;
+      throw err;
     }
 
     this.#preCheckOk = true;
@@ -430,11 +423,6 @@ class Schematic {
   }
 
 
-  exit(v) {
-    console.log(v);
-    process.exit();
-  }
-
   async scaffold(filename, short = false, blockOnly = false) {
     filename = filename.replace(/(\.js|\.liquid|[^a-z0-9\-\_])/g, '');
 
@@ -510,9 +498,10 @@ class Schematic {
 
     // Check if file already exists
     if (fs.existsSync(filePath)) {
-      this.logger.error(`File already exists: ${filename}`);
-      console.log('  Please choose a different name or remove the existing file.');
-      process.exit(1);
+      const err = new Error(`File already exists: ${filename}`);
+      err.code = 'FILE_EXISTS';
+      err.filename = filename;
+      throw err;
     }
 
     // Detect project module type from package.json
@@ -568,20 +557,21 @@ const app = new Schematic({
 app.run();
 `;
 
+    // Write the file, make it executable. Any underlying fs error bubbles up
+    // to bin/schematic's top-level catch with its original message preserved.
     try {
-      // Write the file
       await fs.writeFile(filePath, template);
-
-      // Make it executable
       await fs.chmod(filePath, '755');
-
-      this.logger.success(`Created executable: ${filename}`);
-      console.log(`\n  Run it with: ./${filename}\n`);
     }
     catch(err) {
-      this.logger.error(`Failed to create executable: ${err.message}`);
-      process.exit(1);
+      const wrapped = new Error(`Failed to create executable: ${err.message}`);
+      wrapped.code = 'INIT_WRITE_FAILED';
+      wrapped.cause = err;
+      throw wrapped;
     }
+
+    this.logger.success(`Created executable: ${filename}`);
+    console.log(`\n  Run it with: ./${filename}\n`);
   }
 
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+const chalk = require('chalk');
 const { Schematic } = require('../src/schematic.js');
 
 // Simple flag parser
@@ -25,6 +26,40 @@ function parseFlags(args) {
   return { flags, positional };
 }
 
+// Log an error message and exit non-zero. All CLI exits go through here so
+// library code can stay exit-free.
+function bail(msg) {
+  console.error(msg);
+  process.exit(1);
+}
+
+// Format a library-thrown error for display, then exit 1.
+// Known error codes get friendlier formatting; everything else falls back
+// to logger.error + raw message.
+function displayErrorAndExit(app, err) {
+  const tip = app.logger.useColor ? chalk.yellow('💡 Tip:') : 'Tip:';
+
+  if (err.code === 'MISSING_DIRECTORIES') {
+    app.logger.error('Missing required directories');
+    console.log('   Missing:', err.missing.join(', '));
+    console.log();
+    console.log(tip, 'Run this command from your Shopify theme root directory');
+    console.log('   Expected structure:');
+    console.log('   - ./config/');
+    console.log('   - ./sections/');
+    console.log('   - ./snippets/');
+    console.log('   - ./locales/');
+    console.log('   - ./src/schema/');
+  } else if (err.code === 'FILE_EXISTS') {
+    app.logger.error(`File already exists: ${err.filename}`);
+    console.log('  Please choose a different name or remove the existing file.');
+  } else {
+    app.logger.error(err.message);
+  }
+
+  process.exit(1);
+}
+
 // Main async entry point - properly awaits all async methods
 (async () => {
   const app = new Schematic();
@@ -38,7 +73,7 @@ function parseFlags(args) {
   try {
     if (command) {
       if (command === 'scaffold') {
-        if (!arg) app.exit(`scaffold requires a filename [section-name]`);
+        if (!arg) bail('scaffold requires a filename [section-name]');
 
         const short = flags.short || flags.s || false;
         const blockOnly = flags.block || flags.b || false;
@@ -54,7 +89,7 @@ function parseFlags(args) {
       }
 
       else if (command === 'section') {
-        if (!arg) app.exit(`section requires a file path`);
+        if (!arg) bail('section requires a file path');
 
         await app.runSection(arg);
       }
@@ -64,11 +99,11 @@ function parseFlags(args) {
         await app.init(filename);
       }
 
-      else app.exit(`command not recognized: "${command}". Valid commands are: scaffold, section, init`);
+      else bail(`command not recognized: "${command}". Valid commands are: scaffold, section, init`);
     }
 
     else await app.run();
   } catch (err) {
-    app.exit(err.message);
+    displayErrorAndExit(app, err);
   }
 })();

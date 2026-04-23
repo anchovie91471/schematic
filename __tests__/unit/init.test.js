@@ -73,28 +73,16 @@ describe('Init Command', () => {
   });
 
   describe('File existence checking', () => {
-    it('should error if file already exists', async () => {
+    it('should throw FILE_EXISTS error if file already exists', async () => {
       // Create a file first
       const filePath = path.join(testDir, 'schematic');
       fs.writeFileSync(filePath, 'existing content');
 
-      await schematic.init('schematic');
-
-      // Should have called process.exit(1)
-      expect(process.exit).toHaveBeenCalledWith(1);
-    });
-
-    it('should show helpful message when file exists', async () => {
-      // Create a file first
-      const filePath = path.join(testDir, 'schematic');
-      fs.writeFileSync(filePath, 'existing content');
-
-      await schematic.init('schematic');
-
-      // Should show helpful message
-      expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('Please choose a different name')
-      );
+      await expect(schematic.init('schematic')).rejects.toMatchObject({
+        code: 'FILE_EXISTS',
+        filename: 'schematic',
+        message: expect.stringContaining('File already exists'),
+      });
     });
   });
 

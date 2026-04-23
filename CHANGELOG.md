@@ -15,6 +15,16 @@ Attempting to be more organized about feature changes between versions.
 
 _138 tests still passing across all phase-1 changes._
 
+### Phase 2 — Library purity
+
+- **Breaking:** `Schematic#preCheck()`, `Schematic#init()`, and `Schematic#exit()` no longer call `process.exit()`. Library code is now exit-free; only `bin/schematic` decides when to terminate.
+  - **`preCheck()`** throws an `Error` with `code: 'MISSING_DIRECTORIES'` and a `missing: string[]` array when required directories are absent.
+  - **`init()`** throws `code: 'FILE_EXISTS'` (with `filename`) when the target executable name already exists, and `code: 'INIT_WRITE_FAILED'` (with `cause` pointing at the underlying fs error) when the write or chmod step fails.
+  - **`Schematic#exit(v)`** method is **removed entirely** — it was a library-owned `console.log` + `process.exit()` that silently exited with code 0 (masking CI failures as successes).
+- **Breaking (positive):** `bin/schematic` now exits with code **1** on any error, not code 0. CI pipelines that were spuriously green on failed Schematic runs will start reporting the failure correctly. The error-formatting UI (missing-directories hints, file-exists guidance) moved from the library into `bin/schematic`'s top-level catch, where a new `displayErrorAndExit(app, err)` helper switches on `err.code` to format known errors and falls back to `logger.error(err.message)` for everything else.
+- **Why:** Programmatic users (tests, the future watcher, third-party embedders) no longer have their Node process killed under them when Schematic hits a recoverable error. The watcher can catch `preCheck` failures and keep waiting for the user to fix the theme instead of dying. Tests can use `expect().rejects.toThrow()` instead of mocking `process.exit`.
+- Test updates: `__tests__/unit/init.test.js` now asserts the thrown error shape instead of `process.exit` being called; added a new `__tests__/unit/optional-paths.test.js` case covering `preCheck()` throwing `MISSING_DIRECTORIES` when a required directory is missing. Total: 138 tests still passing.
+
 ## 2.2.10
 - **Docs:** README updates to document v2.2.9 functionality and trim stale content.
   - Added a Node 20 prerequisite note under `## To use`. Users on older Node now see the requirement up front rather than hitting a cryptic install-time error from npm.
