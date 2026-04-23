@@ -1,23 +1,23 @@
 const { Schematic } = require('../../dist/index.cjs');
 
-// Reference implementation for cross-checking the production #replaceUpToLastMarker.
-// Intentionally uses a different strategy: `.match()` to collect all marker texts, then
-// `.lastIndexOf()` to locate the last occurrence. The production code uses `.matchAll()`
-// iteration with running lastEnd tracking — so if both implementations produce the same
-// result on the same input, at least two distinct strategies agree.
-function naiveReplaceUpToLastMarker(contents, newText) {
+// Reference implementation for cross-checking the production #replaceUpToFirstMarker.
+// Intentionally uses a different strategy: `.search()` to locate the first match position,
+// then character-by-character scan to compute the end of that match. Production code uses
+// `.match()` on a non-/g regex — so if both implementations produce the same result on
+// the same input, at least two distinct strategies agree.
+function naiveReplaceUpToFirstMarker(contents, newText) {
   const markers = contents.match(/{%-?\s*comment\s*-?%}\s*schematic/gi);
   if (!markers) return contents;
-  const lastMarker = markers[markers.length - 1];
-  const lastMarkerStart = contents.lastIndexOf(lastMarker);
-  return newText + contents.slice(lastMarkerStart + lastMarker.length);
+  const firstMarker = markers[0];
+  const firstMarkerStart = contents.indexOf(firstMarker);
+  return newText + contents.slice(firstMarkerStart + firstMarker.length);
 }
 
-function findLastMarkerEnd(contents) {
+function findFirstMarkerEnd(contents) {
   const markers = contents.match(/{%-?\s*comment\s*-?%}\s*schematic/gi);
   if (!markers) return -1;
-  const lastMarker = markers[markers.length - 1];
-  return contents.lastIndexOf(lastMarker) + lastMarker.length;
+  const firstMarker = markers[0];
+  return contents.indexOf(firstMarker) + firstMarker.length;
 }
 
 // Simple seedable PRNG (mulberry32). Deterministic for reproducibility.
@@ -151,7 +151,7 @@ describe('Fuzz tests for writeCode / writeCodeShort marker matching (v2.2.9)', (
       }
     });
 
-    test('output always preserves everything after the last marker', () => {
+    test('output always preserves everything after the first marker', () => {
       const marker = '{% comment %} schematic {% endcomment %}';
       const suffix = '<h1>after</h1>\n<p>more</p>\n<!-- end -->';
       const inputs = [
@@ -164,8 +164,8 @@ describe('Fuzz tests for writeCode / writeCodeShort marker matching (v2.2.9)', (
       ];
 
       for (const input of inputs) {
-        const lastEnd = findLastMarkerEnd(input);
-        const expectedSuffix = input.slice(lastEnd);
+        const firstEnd = findFirstMarkerEnd(input);
+        const expectedSuffix = input.slice(firstEnd);
         const result = schematic.writeCode(input, IMPORT_NAME, SCHEMA);
         expect(result.endsWith(expectedSuffix)).toBe(true);
       }
@@ -185,14 +185,20 @@ describe('Fuzz tests for writeCode / writeCodeShort marker matching (v2.2.9)', (
       }
     });
 
-    test('multi-marker inputs collapse to a single marker in output', () => {
+    test('multi-marker inputs preserve trailing markers under first-match semantics', () => {
+      // v3.0.0 behavior change: first-match replaces up to and including the FIRST
+      // marker. Content after the first marker (including subsequent markers) is
+      // preserved verbatim. 2.x collapsed all markers to one under last-match.
       const marker = '{% comment %} schematic {% endcomment %}\n';
       const input = marker.repeat(5) + '<end/>';
 
       const result = schematic.writeCode(input, IMPORT_NAME, SCHEMA);
 
       const matches = result.match(/{%-?\s*comment\s*-?%}\s*schematic/gi) || [];
-      expect(matches.length).toBe(1);
+      // 1 newly-generated marker (end of the replacement code) + 4 preserved
+      // originals (markers 2 through 5 from the input)
+      expect(matches.length).toBe(5);
+      expect(result.endsWith('<end/>')).toBe(true);
     });
 
     test('case insensitivity: UPPERCASE and MiXeD-case markers match', () => {
@@ -234,14 +240,14 @@ describe('Fuzz tests for writeCode / writeCodeShort marker matching (v2.2.9)', (
         }
 
         const result = schematic.writeCode(input, IMPORT_NAME, SCHEMA);
-        const lastEnd = findLastMarkerEnd(input);
+        const firstEnd = findFirstMarkerEnd(input);
 
-        if (lastEnd === -1) {
+        if (firstEnd === -1) {
           expect(result).toBe(input);
           continue;
         }
 
-        const preservedSuffix = input.slice(lastEnd);
+        const preservedSuffix = input.slice(firstEnd);
         expect(result.endsWith(preservedSuffix)).toBe(true);
 
         // Recover the generated code block by taking the prefix of result
@@ -250,7 +256,7 @@ describe('Fuzz tests for writeCode / writeCodeShort marker matching (v2.2.9)', (
 
         // Cross-check: feeding that same generatedCode into the naive reference
         // should reproduce the exact same output
-        const reference = naiveReplaceUpToLastMarker(input, generatedCode);
+        const reference = naiveReplaceUpToFirstMarker(input, generatedCode);
         expect(result).toBe(reference);
       }
     });
@@ -266,17 +272,17 @@ describe('Fuzz tests for writeCode / writeCodeShort marker matching (v2.2.9)', (
         }
 
         const result = schematic.writeCodeShort(input, IMPORT_NAME, {});
-        const lastEnd = findLastMarkerEnd(input);
+        const firstEnd = findFirstMarkerEnd(input);
 
-        if (lastEnd === -1) {
+        if (firstEnd === -1) {
           expect(result).toBe(input);
           continue;
         }
 
-        const preservedSuffix = input.slice(lastEnd);
+        const preservedSuffix = input.slice(firstEnd);
         expect(result.endsWith(preservedSuffix)).toBe(true);
         const generatedCode = result.slice(0, result.length - preservedSuffix.length);
-        const reference = naiveReplaceUpToLastMarker(input, generatedCode);
+        const reference = naiveReplaceUpToFirstMarker(input, generatedCode);
         expect(result).toBe(reference);
       }
     });

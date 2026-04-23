@@ -80,10 +80,12 @@ describe('Code Generation', () => {
   });
 
   // Edge case matrix — added in 2.2.6 to lock down marker-matching semantics
-  // after the regex perf fix. Before 2.2.6, these behaviors were emergent from
-  // a greedy regex that caused catastrophic backtracking; after 2.2.6 they are
-  // explicit in the #replaceUpToLastMarker helper.
-  describe('marker matching (regression coverage for 2.2.6 perf fix)', () => {
+  // after the regex perf fix. v3.0.0 changed the behavior from "match LAST
+  // marker" to "match FIRST marker" via #replaceUpToFirstMarker. For single-
+  // marker files (the common case) results are byte-identical; multi-marker
+  // files produce different output — content after the first marker is now
+  // preserved instead of discarded.
+  describe('marker matching (regression coverage for 2.2.6 perf fix + v3 first-match switch)', () => {
     const schema = { settings: [], blocks: [] };
 
     test('returns contents unchanged when no marker is present', () => {
@@ -112,15 +114,20 @@ describe('Code Generation', () => {
       expect(result).toMatch(/\{%- comment -%\} schematic$/);
     });
 
-    test('matches LAST marker when multiple are present (preserves pre-2.2.6 semantics)', () => {
+    test('matches FIRST marker when multiple are present (v3 behavior change from 2.x)', () => {
       const contents = 'A\n{%- comment -%} schematic\nB\n{%- comment -%} schematic\nC';
       const result = schematic.writeCode(contents, 'test', schema);
-      // Old greedy regex matched through the LAST marker, discarding "B" between markers.
-      // 2.2.6 preserves this behavior. The suffix after the last marker is "\nC".
+      // v3.0.0 matches the FIRST marker. Everything AFTER the first marker —
+      // including the "\nB\n" content and the SECOND marker — is preserved.
+      // (2.x matched LAST and destroyed content between markers.)
       expect(result).toContain("render 'test'");
-      expect(result.endsWith('\nC')).toBe(true);
-      expect(result).not.toContain('A\n{%- comment -%}'); // first marker consumed
-      expect(result).not.toContain('\nB\n');              // content between markers discarded
+      expect(result).not.toContain('A\n{%- comment -%}');  // content before first marker consumed
+      expect(result).toContain('\nB\n');                    // content between markers preserved (was discarded in 2.x)
+      expect(result.endsWith('\nC')).toBe(true);            // suffix preserved (unchanged from 2.x)
+      // Result now contains TWO markers: the newly-generated one at the end of
+      // `code` plus the second original marker that was preserved.
+      const markerCount = (result.match(/{%-?\s*comment\s*-?%}\s*schematic/gi) || []).length;
+      expect(markerCount).toBe(2);
     });
 
     test('matches case-insensitively', () => {

@@ -57,6 +57,24 @@ _138 tests still passing across all phase-1 changes._
 
 **Total after phase 3: 144 tests passing (142 + 2 skipped unchanged). Dist size: 52.1 kB CJS / 48.8 kB ESM (down from 58.2 kB / 56.9 kB).**
 
+### Phase 4 — Lazy regex: match first marker, preserve the rest
+
+- **Breaking (behavior change):** `writeCode` / `writeCodeShort` now replace content up to and including the **first** `{% comment %} schematic` marker in a liquid file. 2.x matched the **last** marker — an accidental side effect of a greedy regex that catastrophically backtracked until v2.2.7 fixed the performance issue while preserving the "match last" semantics for strict semver compatibility.
+- **Impact:** On any liquid file with exactly one marker, output is byte-identical to 2.x. Multi-marker files produce different output: content between the first marker and the second/Nth marker is now **preserved** instead of discarded. The rename of the helper from `#replaceUpToLastMarker` to `#replaceUpToFirstMarker` reflects the flip.
+- **Migration — how to find affected files:** `grep -rcE '{%-?\s*comment\s*-?%}\s*schematic' sections/ blocks/ | awk -F: '$2 > 1'`. Any file reporting >1 marker is where 2.x and 3.x produce different output. Most commonly this is a `{% raw %}…{% endraw %}` documentation block showing an example marker alongside the real one. On 2.x, running Schematic destroyed everything in that documentation block between the fake and real markers; on 3.x, the documentation survives.
+- **Why the change is justified in a major release:**
+  - The 2.x "match last" was preserved by policy, not by design — it was a side effect of a catastrophically-backtracking greedy regex fixed in v2.2.7.
+  - First-match is strictly less destructive on edge cases: it preserves user content after the first marker instead of deleting everything between markers.
+  - The simpler semantics match how users think about the marker ("everything above is generated, everything below is mine").
+  - A corrective change like this fits the v3.0.0 bill per the 2026-04-22 semver policy — under-the-hood improvement that couldn't ship in 2.x.
+- **Test coverage updated:**
+  - `__tests__/unit/write-code.test.js`: replaced the "matches LAST marker" assertion with "matches FIRST marker; preserves trailing markers; 2 markers in output" (one new from the generated code, one preserved from input).
+  - `__tests__/unit/fuzz-write-code.test.js`: reference implementation renamed `naiveReplaceUpToLastMarker` → `naiveReplaceUpToFirstMarker` (uses `indexOf` + first marker). Helper renamed `findLastMarkerEnd` → `findFirstMarkerEnd`. Correctness invariant that 2.x multi-marker collapses to 1 marker flipped to "multi-marker inputs preserve trailing markers" — a 5-marker input now produces 5 markers in the output (1 new + 4 preserved).
+  - 200-iteration cross-check fuzz runs still pass for both `writeCode` and `writeCodeShort`: production and naive reference agree on every random input.
+- **Perf regression guards preserved:** fuzz harness's adversarial-input performance tests (catastrophic-backtracking regression tests from v2.2.9) still cap each call at <100ms. The new `.match()`-based implementation is O(n) — same as the v2.2.7 `.matchAll()` loop.
+
+**Total after phase 4: 144 tests still passing.**
+
 ## 2.2.10
 - **Docs:** README updates to document v2.2.9 functionality and trim stale content.
   - Added a Node 20 prerequisite note under `## To use`. Users on older Node now see the requirement up front rather than hitting a cryptic install-time error from npm.

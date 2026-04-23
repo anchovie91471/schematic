@@ -1167,26 +1167,33 @@ ${rendered}
 -%}
 {%- comment -%} schematic`;
 
-    return this.#replaceUpToLastMarker(contents, code);
+    return this.#replaceUpToFirstMarker(contents, code);
   }
 
   writeCodeShort(contents, importFilename, schema) {
     const code = `{%- render '${importFilename}' with section as section -%}
 
 {%- comment -%} schematic`;
-    return this.#replaceUpToLastMarker(contents, code);
+    return this.#replaceUpToFirstMarker(contents, code);
   }
 
-  // Replace everything up to and including the LAST `{% comment %} schematic` marker.
-  // Preserves the original greedy-regex semantics (match-last-occurrence) but runs in O(n)
-  // instead of O(n^2) catastrophic backtracking. See .plans/2026-04-22-v2.2.6-perf-and-verbose-fix.md
-  #replaceUpToLastMarker(contents, code) {
-    let lastEnd = -1;
-    for (const m of contents.matchAll(/{%-?\s*comment\s*-?%}\s*schematic/gi)) {
-      lastEnd = m.index + m[0].length;
-    }
-    if (lastEnd === -1) return contents;
-    return code + contents.slice(lastEnd);
+  // Replace everything up to and including the FIRST `{% comment %} schematic` marker.
+  //
+  // Behavior change from 2.x:
+  //   2.x matched the LAST marker (an accidental side effect of a greedy regex that
+  //   catastrophically backtracked, fixed in v2.2.7 with preserved semantics). On files
+  //   with multiple markers — most often a user's `{% raw %}` documentation block showing
+  //   an example marker alongside the real one — last-match destroyed everything between
+  //   the markers. First-match preserves user content after the first marker instead.
+  //
+  // Migration: on any valid liquid file with exactly one marker (the overwhelming common
+  // case) output is byte-identical to 2.x. Multi-marker files produce different output;
+  // see CHANGELOG v3.0.0 for details.
+  #replaceUpToFirstMarker(contents, code) {
+    const m = contents.match(/{%-?\s*comment\s*-?%}\s*schematic/i);
+    if (!m) return contents;
+    const end = m.index + m[0].length;
+    return code + contents.slice(end);
   }
 };
 
