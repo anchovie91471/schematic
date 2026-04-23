@@ -1,4 +1,4 @@
-const { app } = require('../../../../loader.js');
+const { app } = require('../../../../dist/index.cjs');
 
 module.exports = {
   name: 'Test Block',

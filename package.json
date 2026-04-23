@@ -8,11 +8,29 @@
     "schema",
     "build"
   ],
-  "main": "./loader.js",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "README.md",
+    "CHANGELOG.md"
+  ],
   "bin": {
     "schematic": "bin/schematic"
   },
   "scripts": {
+    "build": "node scripts/build.mjs",
+    "prepare": "npm run build",
+    "pretest": "npm run build",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage"
@@ -41,6 +59,7 @@
     "node": ">=20.0.0"
   },
   "devDependencies": {
+    "esbuild": "^0.28.0",
     "jest": "^30.2.0"
   },
   "dependencies": {

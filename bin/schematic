@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 const chalk = require('chalk');
-const { Schematic } = require('../src/schematic.js');
+const { Schematic } = require('../dist/index.cjs');
 
 // Simple flag parser
 function parseFlags(args) {

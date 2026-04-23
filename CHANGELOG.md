@@ -25,6 +25,22 @@ _138 tests still passing across all phase-1 changes._
 - **Why:** Programmatic users (tests, the future watcher, third-party embedders) no longer have their Node process killed under them when Schematic hits a recoverable error. The watcher can catch `preCheck` failures and keep waiting for the user to fix the theme instead of dying. Tests can use `expect().rejects.toThrow()` instead of mocking `process.exit`.
 - Test updates: `__tests__/unit/init.test.js` now asserts the thrown error shape instead of `process.exit` being called; added a new `__tests__/unit/optional-paths.test.js` case covering `preCheck()` throwing `MISSING_DIRECTORIES` when a required directory is missing. Total: 138 tests still passing.
 
+### Phase 2.5 — Dual-format package (CJS + ESM via conditional exports)
+
+- **Breaking (packaging):** The package now ships a built `dist/` directory with both CommonJS and native ESM entry points. Consumers on either module system get first-class named exports.
+  - CJS consumers: `const { Schematic, app } = require('@anchovie/schematic')` → `dist/index.cjs`
+  - ESM consumers: `import { Schematic, app } from '@anchovie/schematic'` → `dist/index.mjs` (proper named exports, not a bundled `default`)
+  - `package.json` now uses the `exports` field with `import`/`require`/`default` conditions. Deep imports like `require('@anchovie/schematic/src/schematic.js')` are no longer supported — the only public entry is the main export (plus `./package.json`).
+- **Added:** `scripts/build.mjs` — esbuild-driven build that emits both formats from a single `src/index.js` source and runs a post-build self-verification that each output exposes the expected `{ Schematic, app }` shape. Build runs in ~6ms; self-verification fails the build if either format is broken.
+- **Added:** `esbuild@^0.28.0` as a dev dependency (not shipped to consumers — only used at build time).
+- **Added:** `prepare` (runs on local install / before publish), `pretest` (runs before `npm test`), and `build` npm scripts. `prepare` does NOT run on registry installs, so end users get the pre-built tarball as-is without needing a build toolchain.
+- **Moved:** The previous `loader.js` entry point (4-line wrapper exporting `{ Schematic, app }`) was replaced by `src/index.js`, which uses native ESM `import`/`export` syntax so esbuild can emit proper named exports in both formats. `src/schematic.js` is still CJS underneath — phase 3 will rewrite that source to native ESM and remove the interim `createRequire` banner that currently shims `require()` inside `dist/index.mjs`.
+- **Changed:** `bin/schematic` now requires `../dist/index.cjs` instead of `../src/schematic.js`. Ensures the CLI exercises the same built artifact end users get.
+- **Packaging:** Added explicit `files` allowlist to `package.json` (`dist`, `bin`, `README.md`, `CHANGELOG.md`). Source is no longer in the tarball — consumers get 6 files / ~43 kB compressed / ~175 kB unpacked (vs. the prior all-src arrangement).
+- **Test coverage:** New `__tests__/unit/dist-smoke.test.js` (6 tests) verifying dist existence, CJS require shape, CJS instance surface, ESM static-shape sanity, the `createRequire` banner presence (phase-3 removes this), and that `bin/schematic` points at the built CJS. Existing test fixtures (`__tests__/fixtures/schema/test-section.js` and `theme-blocks/test-block.js`) updated to `require('../../../dist/index.cjs')` — they used to reference the removed `loader.js`.
+
+**Total after phase 2.5: 144 tests passing (138 + 6 dist-smoke).**
+
 ## 2.2.10
 - **Docs:** README updates to document v2.2.9 functionality and trim stale content.
   - Added a Node 20 prerequisite note under `## To use`. Users on older Node now see the requirement up front rather than hitting a cryptic install-time error from npm.
