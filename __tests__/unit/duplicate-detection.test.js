@@ -1,4 +1,4 @@
-const { Schematic } = require('../../src/schematic');
+const { Schematic } = require('../../dist/index.cjs');
 
 describe('Duplicate ID Detection', () => {
   let schematic;

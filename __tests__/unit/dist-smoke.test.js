@@ -14,12 +14,13 @@ describe('dist/ build smoke test', () => {
     expect(fs.existsSync(distMjs)).toBe(true);
   });
 
-  test('CJS require exposes Schematic class and app helpers object', () => {
+  test('CJS require exposes Schematic class, app helpers, and Logger', () => {
     const m = require(distCjs);
     expect(typeof m.Schematic).toBe('function');
     expect(typeof m.app).toBe('object');
     expect(typeof m.app.section).toBe('function');
     expect(typeof m.app.make).toBe('function');
+    expect(typeof m.Logger).toBe('function');
   });
 
   test('CJS build instantiates a Schematic with the full public surface', () => {
@@ -35,16 +36,22 @@ describe('dist/ build smoke test', () => {
     expect(typeof instance.buildLocales).toBe('function');
   });
 
-  test('ESM output has named exports for Schematic and app (static check)', () => {
+  test('ESM output has named exports for Schematic, app, and Logger', () => {
     const mjs = fs.readFileSync(distMjs, 'utf8');
-    // esbuild emits `export { Schematic, app };` or similar as the final line
-    expect(mjs).toMatch(/export\s*\{[^}]*\bSchematic\b[^}]*\bapp\b[^}]*\}/);
+    // Phase 3 rewrote src/ to native ESM so esbuild emits clean named exports
+    expect(mjs).toMatch(/export\s*\{[^}]*\bSchematic\b[^}]*\}/);
+    expect(mjs).toMatch(/export\s*\{[^}]*\bapp\b[^}]*\}/);
+    expect(mjs).toMatch(/export\s*\{[^}]*\bLogger\b[^}]*\}/);
   });
 
-  test('ESM output has the createRequire banner (phase-3 removes this)', () => {
+  test('ESM output does NOT contain the phase-2.5 createRequire banner', () => {
     const mjs = fs.readFileSync(distMjs, 'utf8');
-    expect(mjs).toMatch(/createRequire/);
-    expect(mjs).toMatch(/import\.meta\.url/);
+    // Phase 3 converted src/ to native ESM, so the createRequire shim that
+    // phase-2.5 added to make CJS-style requires work inside ESM output is
+    // no longer needed. If this assertion starts failing, something regressed
+    // to CJS-style requires in src/.
+    expect(mjs).not.toMatch(/createRequire/);
+    expect(mjs).not.toMatch(/__esbuildCreateRequire/);
   });
 
   test('bin/schematic references the built CJS, not the src/ entry', () => {

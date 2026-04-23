@@ -1,4 +1,4 @@
-const { Schematic } = require('../../src/schematic');
+const { Schematic } = require('../../dist/index.cjs');
 const fs = require('fs-extra');
 const path = require('path');
 

@@ -1,9 +1,7 @@
-// Public entry. Uses ESM syntax so esbuild can emit proper named exports
-// in both dist/index.cjs (via ESM→CJS conversion) and dist/index.mjs.
-// src/schematic.js is still CJS underneath — bundle mode handles the interop.
-import pkg from './schematic.js';
+// Public entry. esbuild bundles this into dist/index.cjs and dist/index.mjs.
+import { Schematic, SchematicHelpers } from './schematic.js';
+import { Logger } from './logger.js';
 
-const { Schematic, SchematicHelpers } = pkg;
 const app = new SchematicHelpers();
 
-export { Schematic, app };
+export { Schematic, app, Logger };

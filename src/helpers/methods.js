@@ -235,4 +235,4 @@ const methods =
   },
 };
 
-module.exports = methods;
+export default methods;

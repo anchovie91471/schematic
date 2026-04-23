@@ -1,4 +1,4 @@
-const { Logger } = require('../../src/logger');
+const { Logger } = require('../../dist/index.cjs');
 
 describe('Logger', () => {
   let logger;

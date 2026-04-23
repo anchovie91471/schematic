@@ -1,10 +1,14 @@
-const fs = require('fs-extra');
-const path = require('path');
-const { pathToFileURL } = require('url');
-const chalk = require('chalk');
-const { Logger } = require('./logger.js');
+import fs from 'fs-extra';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import chalk from 'chalk';
+import { Logger } from './logger.js';
+import commonHelpers from './helpers/common.js';
+import methodHelpers from './helpers/methods.js';
 
-// Dynamic import for ora (ESM package)
+// Dynamic import for ora. Now that src/ is ESM this could be a static import,
+// but keeping it lazy avoids paying ora's load cost for one-shot non-TTY runs
+// (CI, piped output) where the spinner never fires.
 let ora;
 const getOra = async () => {
   if (!ora) {
@@ -130,33 +134,19 @@ class Schematic {
   }
 
   /**
-   * Load a schema file, supporting both CommonJS and ESM
+   * Load a schema file. Works uniformly for .cjs, .mjs, and .js in either
+   * CJS or ESM projects — Node 20+'s ESM loader handles CJS interop by
+   * wrapping `module.exports` as the `default` export of the returned
+   * namespace. We peel `.default` when present (CJS files and ESM files
+   * that use `export default {...}`) and fall back to the namespace itself
+   * for ESM files that use only named exports.
+   *
    * @param {string} filePath - Absolute path to schema file
-   * @returns {Promise<object>} - The schema object
+   * @returns {Promise<object>} - The schema object (or namespace fallback)
    */
   async #loadSchemaFile(filePath) {
-    const ext = path.extname(filePath);
-
-    // .cjs files are always CommonJS - use require
-    if (ext === '.cjs') {
-      return require(filePath);
-    }
-
-    // .mjs files are always ESM - use import
-    if (ext === '.mjs') {
-      const module = await import(pathToFileURL(filePath));
-      return module.default || module;
-    }
-
-    // .js files depend on project type
-    if (this.#isESM) {
-      // In ESM projects, .js files are ESM - use import
-      const module = await import(pathToFileURL(filePath));
-      return module.default || module;
-    } else {
-      // In CommonJS projects, .js files are CommonJS - use require
-      return require(filePath);
-    }
+    const mod = await import(pathToFileURL(filePath).href);
+    return mod.default || mod;
   }
 
   // Helper to convert absolute paths to relative for cleaner output
@@ -1203,11 +1193,7 @@ ${rendered}
 
 class SchematicHelpers {
   constructor() {
-    let loader = [
-      require('./helpers/common.js'),
-      require('./helpers/methods.js'),
-    ];
-
+    const loader = [commonHelpers, methodHelpers];
     for (const props of loader) {
       for (const [key, def] of Object.entries(props)) {
         this[key] = def;
@@ -1217,7 +1203,4 @@ class SchematicHelpers {
 }
 
 
-module.exports = {
-  Schematic: Schematic,
-  SchematicHelpers: SchematicHelpers,
-};
+export { Schematic, SchematicHelpers };

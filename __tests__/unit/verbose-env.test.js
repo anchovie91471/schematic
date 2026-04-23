@@ -1,4 +1,4 @@
-const { Schematic } = require('../../src/schematic.js');
+const { Schematic } = require('../../dist/index.cjs');
 
 // Regression coverage for the 2.2.6 fix to SCHEMATIC_VERBOSE. Before the fix, the
 // Logger was instantiated in the constructor with the default verbose=false, and

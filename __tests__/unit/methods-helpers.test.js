@@ -1,4 +1,7 @@
-const methods = require('../../src/helpers/methods.js');
+// The `app` export is a SchematicHelpers instance with every method from
+// helpers/common.js and helpers/methods.js attached as instance methods —
+// so the checks here work against the public API just like a consumer would.
+const { app: methods } = require('../../dist/index.cjs');
 
 describe('methods helpers', () => {
   describe('sidebar()', () => {

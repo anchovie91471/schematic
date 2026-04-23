@@ -28,16 +28,10 @@ await build({
   outfile: resolve(outdir, 'index.cjs'),
 });
 
-// ESM output needs a createRequire shim because src/ is currently written in
-// CJS style (`const fs = require('fs-extra')`). Phase 3 will rewrite the source
-// to native ESM imports and this banner becomes unnecessary.
 await build({
   ...shared,
   format: 'esm',
   outfile: resolve(outdir, 'index.mjs'),
-  banner: {
-    js: "import { createRequire as __esbuildCreateRequire } from 'node:module';\nconst require = __esbuildCreateRequire(import.meta.url);",
-  },
 });
 
 // Post-build self-verification. Jest can't run real ESM dynamic imports without
@@ -47,17 +41,21 @@ console.log('\nVerifying dist/ outputs...');
 
 const cjsMod = await import(resolve(outdir, 'index.cjs'));
 const cjsDefault = cjsMod.default || cjsMod;
-if (typeof cjsDefault.Schematic !== 'function' || typeof cjsDefault.app !== 'object') {
-  throw new Error('dist/index.cjs is missing Schematic or app exports');
+for (const key of ['Schematic', 'app', 'Logger']) {
+  if (cjsDefault[key] === undefined) {
+    throw new Error(`dist/index.cjs is missing expected export: ${key}`);
+  }
 }
 
 const esmMod = await import(resolve(outdir, 'index.mjs'));
-if (typeof esmMod.Schematic !== 'function' || typeof esmMod.app !== 'object') {
-  throw new Error('dist/index.mjs is missing named Schematic or app exports');
+for (const key of ['Schematic', 'app', 'Logger']) {
+  if (esmMod[key] === undefined) {
+    throw new Error(`dist/index.mjs is missing named export: ${key}`);
+  }
 }
 if (typeof esmMod.app.section !== 'function' || typeof esmMod.app.make !== 'function') {
   throw new Error('dist/index.mjs app helper is missing expected methods');
 }
 
-console.log('  dist/index.cjs  ✓ exposes { Schematic, app }');
-console.log('  dist/index.mjs  ✓ exposes named { Schematic, app }');
+console.log('  dist/index.cjs  ✓ exposes { Schematic, app, Logger }');
+console.log('  dist/index.mjs  ✓ exposes named { Schematic, app, Logger }');

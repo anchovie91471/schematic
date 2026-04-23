@@ -1,4 +1,4 @@
-const { Schematic } = require('../../src/schematic.js');
+const { Schematic } = require('../../dist/index.cjs');
 
 // Reference implementation for cross-checking the production #replaceUpToLastMarker.
 // Intentionally uses a different strategy: `.match()` to collect all marker texts, then

@@ -1,4 +1,4 @@
-const { Schematic } = require('../../src/schematic.js');
+const { Schematic } = require('../../dist/index.cjs');
 
 describe('Code Generation', () => {
   let schematic;

@@ -41,6 +41,22 @@ _138 tests still passing across all phase-1 changes._
 
 **Total after phase 2.5: 144 tests passing (138 + 6 dist-smoke).**
 
+### Phase 3 — Module-load unification
+
+- **Breaking (internal):** `src/schematic.js`, `src/helpers/common.js`, `src/helpers/methods.js`, and `src/logger.js` are now native ESM (`import`/`export`) instead of CommonJS (`require`/`module.exports`). User-facing behavior is unchanged — end consumers get the same `{ Schematic, app, Logger }` shape from `dist/index.cjs` and `dist/index.mjs`.
+- **Breaking (minor):** `Schematic#loadSchemaFile()` (private) was simplified from a four-branch dispatch table (`.cjs` → `require`, `.mjs` → `import`, `.js` + ESM project → `import`, `.js` + CJS project → `require`) to a single `await import(pathToFileURL(filePath).href)` path. Node 20+'s ESM loader handles CJS interop transparently. User schema files — regardless of `.js`/`.cjs`/`.mjs` or CJS/ESM project — load through one code path. Observable behavior for valid inputs is unchanged; the `.default || module` peel is preserved.
+- **Added:** `Logger` is now a named export alongside `Schematic` and `app`:
+  - CJS: `const { Logger } = require('@anchovie/schematic')`
+  - ESM: `import { Logger } from '@anchovie/schematic'`
+- **Removed:** The `createRequire` banner in `dist/index.mjs` is gone. Phase 2.5 introduced it as a stopgap because source was still CJS under the hood; now that source is native ESM, esbuild emits clean ESM output with no runtime shim. Dist size dropped from 56.9 kB → 48.8 kB for the ESM bundle (and 58.2 kB → 52.1 kB for the CJS bundle — shims stripped from both).
+- **Test infrastructure:**
+  - All test files now import from `dist/index.cjs` instead of `src/schematic.js` / `src/logger.js` / `src/helpers/*.js`. This mirrors what end consumers get and exercises the built artifact end-to-end. The `pretest` npm script builds `dist/` before every test run so a rebuild is never forgotten.
+  - `__tests__/unit/methods-helpers.test.js` now calls methods through the `app` instance (`app.header(...)`) instead of importing the raw helpers module. Same functions, same behavior — just through the public API like a consumer would.
+  - Test runner now invokes Jest with `NODE_OPTIONS=--experimental-vm-modules` because `await import()` of CJS files from within Jest's test VM needs that flag (Node 20+ requirement for Jest ≤ 30 cross-module-system interop). Set in `package.json` scripts for `test`, `test:watch`, `test:coverage`. On Windows, `cross-env` would be needed if anyone ever runs the suite there — not set up yet; handle if/when.
+- **Cache-bust / watch mode:** Not implemented in phase 3. The `await import()` unified path caches by URL forever, which is fine for one-shot runs (every `Schematic` instantiation starts fresh). Phase 6 (watcher) will design the cache-bust strategy from scratch, informed by real watcher UX — options on the table include URL-bump with a soft memory cap, periodic process restart, and worker-thread dispatch. Not guessing now.
+
+**Total after phase 3: 144 tests passing (142 + 2 skipped unchanged). Dist size: 52.1 kB CJS / 48.8 kB ESM (down from 58.2 kB / 56.9 kB).**
+
 ## 2.2.10
 - **Docs:** README updates to document v2.2.9 functionality and trim stale content.
   - Added a Node 20 prerequisite note under `## To use`. Users on older Node now see the requirement up front rather than hitting a cryptic install-time error from npm.

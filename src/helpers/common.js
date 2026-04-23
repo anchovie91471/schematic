@@ -183,8 +183,7 @@ const defaults = {
 };
 
 
-module.exports =
-{
+export default {
   types: types,
   templates: templates,
   common: common,

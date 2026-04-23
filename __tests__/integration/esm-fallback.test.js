@@ -7,7 +7,7 @@
  * This test would have caught the v2.2.4 bug where #resolveSchemaPath
  * was defined but never called.
  */
-const { Schematic } = require('../../src/schematic.js');
+const { Schematic } = require('../../dist/index.cjs');
 const path = require('path');
 const fs = require('fs-extra');
 const os = require('os');

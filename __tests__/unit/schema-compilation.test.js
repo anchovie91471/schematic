@@ -1,4 +1,4 @@
-const { Schematic } = require('../../src/schematic.js');
+const { Schematic } = require('../../dist/index.cjs');
 const path = require('path');
 
 describe('Schema Compilation', () => {
