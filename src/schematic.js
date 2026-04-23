@@ -33,7 +33,7 @@ class Schematic {
 
   #refSchemaEx = /{%\-?\s*comment\s*\-?%}\s*schematic\s*['"]?([^'"\s{]+)?['"]?\s*(.*)?{%\-?\s*endcomment\s*\-?%}/mi;
   #localizationEx = /{%\-?\s*comment\s*\-?%}\s*schematicLocalization\s*{%\-?\s*endcomment\s*\-?%}/mi;
-  #replaceSchemaEx = /({%\-?\s*schema\s*\-?%}[\s\S]*{%\-?\s*endschema\s*\-?%})/mig;
+  #replaceSchemaEx = /({%\-?\s*schema\s*\-?%}[\s\S]*{%\-?\s*endschema\s*\-?%})/mi;
 
   #preCheckOk = false;
 
@@ -53,8 +53,6 @@ class Schematic {
     settings: 0,
     locales: 0,
   };
-
-  //loader = require.resolve('./webpackLoader.js');
 
   constructor(opts = null) {
     if (opts) {
@@ -159,13 +157,6 @@ class Schematic {
       // In CommonJS projects, .js files are CommonJS - use require
       return require(filePath);
     }
-  }
-
-  out(v, error) {
-    const isError = typeof error !== 'undefined' && error;
-
-    if (this.#opts.verbose || isError) process.stdout.write(v + (isError ? "\n" : ''));
-    if (isError) return false;
   }
 
   // Helper to convert absolute paths to relative for cleaner output
@@ -349,14 +340,14 @@ class Schematic {
     const localePath = `${this.#opts.paths.schema}/locales`;
     this.logger.info(`Checking for locale definitions in ${localePath}`);
 
-    if (!fs.existsSync(localePath)) {
+    if (!(await fs.pathExists(localePath))) {
       this.logger.debug('No locale definitions found');
       return;
     }
 
     this.logger.info('Generating locales...');
 
-    const sourceFiles = fs.readdirSync(localePath);
+    const sourceFiles = await fs.readdir(localePath);
     for (const sourceFile of sourceFiles) {
       // Replace `.${this.#schemaExt}` with `.json`
       const localeFilename = sourceFile.replace(`.${this.#schemaExt}`, '.json');
@@ -371,7 +362,7 @@ class Schematic {
 
           let existing = null;
           try {
-            existing = fs.readFileSync(targetLocalePath, 'utf8');
+            existing = await fs.readFile(targetLocalePath, 'utf8');
           }
           catch { /* file doesn't exist yet; fall through to write */ }
 
@@ -379,7 +370,7 @@ class Schematic {
             this.logger.debug(`${this.relativePath(targetLocalePath)}: unchanged, skipping write`);
           }
           else {
-            fs.writeFileSync(targetLocalePath, parsed);
+            await fs.writeFile(targetLocalePath, parsed);
             this.logger.success(`✓ ${localeFilename}`);
             this.#counters.locales++;
           }
@@ -439,9 +430,6 @@ class Schematic {
   }
 
 
-  commands() {
-    return (process.argv || []).slice(2);
-  }
   exit(v) {
     console.log(v);
     process.exit();
@@ -602,22 +590,36 @@ app.run();
     let fstat = false;
 
     const defaultPath = defaultDir ?? this.#opts.paths.sections;
+    const schemaDir = path.resolve(this.#opts.paths.schema);
+    const themeBlocksDir = this.#opts.paths.themeBlocksSchema
+      ? path.resolve(this.#opts.paths.themeBlocksSchema)
+      : null;
+
+    // Proper directory containment: rel must be non-empty, not climbing out of dir,
+    // and not an absolute path (path.relative returns absolute when dir/candidate are
+    // on different Windows drives).
+    const isInsideDir = (candidate, dir) => {
+      if (!dir) return false;
+      const rel = path.relative(dir, candidate);
+      return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+    };
 
     // full path or relative correct from execution path
     try {
       floc = path.resolve(file);
       fstat = await fs.stat(floc);
 
-      // if the schema file, resolve back to the liquid file
-      if (floc.includes(this.#opts.paths.schema.replace('./', '/'))) {
-        let [, filename] = file.match(/.*\/(.+)$/);
-
-        // Check if it's a theme block schema
-        if (floc.includes(this.#opts.paths.themeBlocksSchema.replace('./', '/'))) {
-          floc = path.resolve(this.#opts.paths.blocks, filename.replace(/\.[mc]?js$/, '.liquid'));
-        } else {
-          floc = path.resolve(defaultPath, filename.replace(/\.[mc]?js$/, '.liquid'));
-        }
+      // If the file lives inside a schema directory, resolve back to the liquid file.
+      // Check theme-blocks first — it's commonly a subdirectory of schema, so the
+      // most-specific match must win.
+      if (isInsideDir(floc, themeBlocksDir)) {
+        const liquidName = path.basename(floc).replace(/\.[mc]?js$/, '.liquid');
+        floc = path.resolve(this.#opts.paths.blocks, liquidName);
+        fstat = await fs.stat(floc);
+      }
+      else if (isInsideDir(floc, schemaDir)) {
+        const liquidName = path.basename(floc).replace(/\.[mc]?js$/, '.liquid');
+        floc = path.resolve(defaultPath, liquidName);
         fstat = await fs.stat(floc);
       }
     }
@@ -833,7 +835,10 @@ app.run();
       return false;
     }
 
-    if (typeof schema !== 'object') {
+    // Valid shapes:
+    //   type === 'schema' (settings_schema.js) → array (Shopify's settings_schema.json is a top-level array)
+    //   everything else (section/block/locale)  → plain object
+    if (!schema || typeof schema !== 'object' || (Array.isArray(schema) && type !== 'schema')) {
       this.logger.schemaError(
         file,
         'Schema must export a JavaScript object using module.exports or export default',

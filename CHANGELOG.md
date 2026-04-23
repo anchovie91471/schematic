@@ -1,8 +1,19 @@
 # Changelog
 Attempting to be more organized about feature changes between versions.
 
-## Unreleased
-- n/a
+## Unreleased (v3.0.0 in progress, branch: `v3.0.0-dev`)
+
+### Phase 1 — dead code + latent-bug cleanup
+
+- **Removed:** `src/webpackLoader.js` — unreferenced stub, never wired up. The commented-out `//loader = require.resolve('./webpackLoader.js')` reference in `schematic.js` is also removed. If bundler integration ever becomes a real user need, it lives outside this core package (Vite/esbuild plugin pattern), not as a webpack loader.
+- **Removed:** `Schematic#commands()` method — returned `process.argv.slice(2)`, never called from anywhere in `src/`, `bin/`, or `__tests__/`. Library code shouldn't own argv inspection; that belongs in `bin/schematic` or a CLI layer.
+- **Removed:** `Schematic#out()` method — predated the `Logger` class, no remaining callers. All output now flows through `this.logger.*`.
+- **Fix (latent):** Dropped the `/g` flag from `#replaceSchemaEx` — with `/g`, `.test()` advances `lastIndex` on match and keeps it between calls. Because `#replaceSchemaEx` is shared across files within a `Schematic` instance, a prior match ending at position *N* could cause a subsequent shorter file's `.test()` to miss its schema block entirely, routing it through the "append new schema" branch and producing duplicate `{% schema %}` tags. Dropping `/g` makes `.test()` stateless without changing the `.replace()` semantics (there's only ever one `{% schema %}` block per file).
+- **Fix:** Tightened the schema-shape check in `compileSchema()` — `typeof schema !== 'object'` passed for both `null` and arrays because `typeof null === 'object'` and `typeof [] === 'object'`. Now explicitly rejects `null` and rejects arrays except when `type === 'schema'` (settings_schema.js, whose on-disk JSON is a top-level array per Shopify's spec). Users accidentally exporting `null` or an array from a section/block/locale file now get the clear "Schema must export a JavaScript object" error instead of silently producing malformed output.
+- **Refactor:** `Schematic#resolvePath()` now uses `path.relative()` + proper separator handling instead of `.replace('./', '/')` + `.includes()` substring matching. The old approach was fragile on absolute paths and Windows separators, and could false-positive on path fragments (e.g., `/some/other/schema-foo/...` matching a `schema` path check). New helper `isInsideDir(candidate, dir)` checks proper directory containment. Also uses `path.basename()` instead of a hand-rolled regex for filename extraction. Theme-blocks vs schema dispatch now handles the case where `themeBlocksSchema` is configured outside `schema` (previously broken).
+- **Refactor:** `Schematic#buildLocales()` now uses fully-async fs I/O — `fs.pathExists`, `fs.readdir`, `fs.readFile`, `fs.writeFile` — instead of the previous mix of sync and async calls inside an `async` method. No observable behavior change; internal consistency only.
+
+_138 tests still passing across all phase-1 changes._
 
 ## 2.2.10
 - **Docs:** README updates to document v2.2.9 functionality and trim stale content.
