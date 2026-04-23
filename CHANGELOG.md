@@ -75,6 +75,46 @@ _138 tests still passing across all phase-1 changes._
 
 **Total after phase 4: 144 tests still passing.**
 
+### Phase 5 — Structural split + TypeScript `.d.ts` definitions
+
+#### 5a — Structural split of `src/schematic.js`
+
+The 1,223-line monolith now shares the work with three focused classes. The **public API is unchanged** — end users still `import { Schematic, app, Logger }` from `@anchovie/schematic` and get the same behavior. Only the source-level organization changed.
+
+- **Added:** `src/loader.js` — `SchemaLoader` class (~65 lines). Owns ESM-project detection (reads host `package.json` for `"type": "module"`), `schemaExt` default, extension-fallback resolution (`resolveSchemaPath`), and the single-path dynamic `import()` loader.
+- **Added:** `src/compiler.js` — `SchemaCompiler` class (~200 lines). Owns `compile()` (the old `compileSchema`), shape validation (null / non-object / array-only-for-settings rejection), uniqueness validation (`validateUniqueIds`, `validateUniqueBlockAttributes`), and the legacy `templates` → `enabled_on.templates` transform.
+- **Added:** `src/writer.js` — `SchemaWriter` class (~225 lines). Owns `buildSchema`, `buildBlockSchema`, `writeCode`, `writeCodeShort`, and the `#replaceUpToFirstMarker` helper from phase 4. Carries its own `#refSchemaEx` / `#replaceSchemaEx` regex instances.
+- **Added:** `src/helpers/index.js` — `SchematicHelpers` class moved out of the bottom of `src/schematic.js` into its own module.
+- **Changed:** `src/schematic.js` shrunk from 1,223 → ~780 lines. The `Schematic` class is now an orchestrator that composes `SchemaLoader`, `SchemaCompiler`, and `SchemaWriter` and delegates to them. All the old public methods (`compileSchema`, `writeCode`, `buildSchema`, `validateUniqueIds`, etc.) remain on `Schematic` as thin delegation wrappers — existing programmatic users and the test suite see no API change.
+- **Kept internal:** `SchemaLoader`, `SchemaCompiler`, and `SchemaWriter` are **not** exposed on `dist/index.cjs` / `dist/index.mjs`. They're implementation detail — exposing them would freeze their APIs; internal splits can still be reshaped in v3.x minor releases.
+
+**Why this is worth doing:**
+- Each piece is now 65–225 lines instead of one 1,223-line file. Easier to hold in context and reason about.
+- Each class is constructible in isolation with explicit dependencies — trivially unit-testable without spinning up a full `Schematic` instance (not exercised by this phase, but the seam is there for any future refactor).
+- Phase 6's watcher can compose its own cache-busting `SchemaLoader` variant without touching `Schematic` or disturbing one-shot runs.
+
+#### 5b — TypeScript `.d.ts` declarations
+
+Hand-written type declarations shipped alongside the JS outputs. **Not** a full TypeScript source rewrite — source stays `.js` with ESM syntax; `.d.ts` is maintained by hand and copied to `dist/` at build time.
+
+- **Added:** `src/index.d.ts` (~8.6 kB) covering:
+  - `SchematicConfig`, `SchematicPaths`, `SchematicLocalization` — config surface.
+  - `Schematic` class — full public method signatures with argument and return types, including delegation methods (`compileSchema`, `buildSchema`, `writeCode`, etc.).
+  - `Logger` class — full surface.
+  - `SchematicApp` — the `app` helper object. Methods are tightly typed (`make`, `section`, `header`, `option`, the ID/option transformers, the array filters). Data bags (`types`, `templates`, `common`, `defaults`) and the dozens of pre-built selector/component objects fall back to `unknown` via an index signature. Tightening those is deferred until user demand surfaces; expanding them in a minor is non-breaking.
+  - `MissingDirectoriesError`, `FileExistsError`, `InitWriteFailedError` — augmented `Error` shapes with `err.code` discriminants so TypeScript users can `switch (err.code)` on them.
+- **Added:** `scripts/build.mjs` now copies `src/index.d.ts` to `dist/index.d.ts` as part of the build. No `tsc` involvement — plain file copy.
+- **Changed:** `package.json` declares `"types": "./dist/index.d.ts"` at the top level and adds the `"types"` condition inside the conditional `"exports"` field so modern resolvers pick up declarations correctly.
+- **Test coverage:** `__tests__/unit/dist-smoke.test.js` gained two new assertions — `.d.ts` is present in `dist/` and the file declares the expected public API surface (class declarations, `app` const, config interfaces, error discriminants). Catches accidental deletion or drift against the JS.
+
+#### 5c — Counter refactor: dropped
+
+Flagged in phase 1, reviewed again in phase 5 planning — the anomaly is invisible in practice (CLI spawns fresh processes; programmatic users may *want* accumulation across runs). Dropping from v3.0.0 scope. Can revisit in v3.x if a concrete need surfaces.
+
+**Tarball shape after phase 5:** 7 files, 48.7 kB compressed, ~182 kB unpacked. Source not shipped. Build tooling (`esbuild`, `scripts/build.mjs`) not shipped.
+
+**Total after phase 5: 145 tests passing** (144 + 1 new assertion on `.d.ts` content).
+
 ## 2.2.10
 - **Docs:** README updates to document v2.2.9 functionality and trim stale content.
   - Added a Node 20 prerequisite note under `## To use`. Users on older Node now see the requirement up front rather than hitting a cryptic install-time error from npm.

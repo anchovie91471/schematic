@@ -3,15 +3,33 @@ const path = require('path');
 
 const distCjs = path.resolve(__dirname, '../../dist/index.cjs');
 const distMjs = path.resolve(__dirname, '../../dist/index.mjs');
+const distDts = path.resolve(__dirname, '../../dist/index.d.ts');
 
 // Jest doesn't support real ESM dynamic `import()` without --experimental-vm-modules,
 // so runtime verification of dist/index.mjs is done in scripts/build.mjs (post-build
 // self-check) rather than here. These Jest tests cover the CJS path (which is also
 // what bin/schematic uses) plus static-shape assertions on the ESM output.
 describe('dist/ build smoke test', () => {
-  test('dist/index.cjs and dist/index.mjs both exist (run npm run build first)', () => {
+  test('dist/index.cjs, dist/index.mjs, dist/index.d.ts all exist (run npm run build first)', () => {
     expect(fs.existsSync(distCjs)).toBe(true);
     expect(fs.existsSync(distMjs)).toBe(true);
+    expect(fs.existsSync(distDts)).toBe(true);
+  });
+
+  test('dist/index.d.ts declares the expected public API', () => {
+    const dts = fs.readFileSync(distDts, 'utf8');
+    // Class declarations
+    expect(dts).toMatch(/export declare class Schematic/);
+    expect(dts).toMatch(/export declare class Logger/);
+    // Named exports
+    expect(dts).toMatch(/export declare const app/);
+    // Config surface
+    expect(dts).toMatch(/export interface SchematicConfig/);
+    expect(dts).toMatch(/export interface SchematicPaths/);
+    // Error discriminants
+    expect(dts).toMatch(/MISSING_DIRECTORIES/);
+    expect(dts).toMatch(/FILE_EXISTS/);
+    expect(dts).toMatch(/INIT_WRITE_FAILED/);
   });
 
   test('CJS require exposes Schematic class, app helpers, and Logger', () => {

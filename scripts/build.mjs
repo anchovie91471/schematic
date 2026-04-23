@@ -2,7 +2,7 @@
 // External deps (chalk, fs-extra, ora, Node built-ins) stay as runtime requires/imports
 // — we don't bundle them into the output.
 import { build } from 'esbuild';
-import { rm, mkdir } from 'node:fs/promises';
+import { rm, mkdir, copyFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
@@ -12,6 +12,10 @@ const outdir = resolve(root, 'dist');
 
 await rm(outdir, { recursive: true, force: true });
 await mkdir(outdir, { recursive: true });
+
+// Ship TypeScript declarations alongside the JS outputs. Hand-maintained in
+// src/index.d.ts — no tsc involvement, just a file copy.
+await copyFile(resolve(root, 'src/index.d.ts'), resolve(outdir, 'index.d.ts'));
 
 const shared = {
   entryPoints: [resolve(root, 'src/index.js')],
@@ -59,3 +63,4 @@ if (typeof esmMod.app.section !== 'function' || typeof esmMod.app.make !== 'func
 
 console.log('  dist/index.cjs  ✓ exposes { Schematic, app, Logger }');
 console.log('  dist/index.mjs  ✓ exposes named { Schematic, app, Logger }');
+console.log('  dist/index.d.ts ✓ copied from src/index.d.ts');

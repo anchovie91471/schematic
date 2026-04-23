@@ -1,10 +1,10 @@
 import fs from 'fs-extra';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import chalk from 'chalk';
 import { Logger } from './logger.js';
-import commonHelpers from './helpers/common.js';
-import methodHelpers from './helpers/methods.js';
+import { SchemaLoader } from './loader.js';
+import { SchemaCompiler } from './compiler.js';
+import { SchemaWriter } from './writer.js';
 
 // Dynamic import for ora. Now that src/ is ESM this could be a static import,
 // but keeping it lazy avoids paying ora's load cost for one-shot non-TTY runs
@@ -35,17 +35,22 @@ class Schematic {
     verbose: false,
   };
 
+  // Detection regex used in runSection/runBlock pre-checks. Writer owns its own
+  // regexes for the actual rewrite — this one is only for the "does this file
+  // even have a schematic marker?" log-message shortcut.
   #refSchemaEx = /{%\-?\s*comment\s*\-?%}\s*schematic\s*['"]?([^'"\s{]+)?['"]?\s*(.*)?{%\-?\s*endcomment\s*\-?%}/mi;
   #localizationEx = /{%\-?\s*comment\s*\-?%}\s*schematicLocalization\s*{%\-?\s*endcomment\s*\-?%}/mi;
-  #replaceSchemaEx = /({%\-?\s*schema\s*\-?%}[\s\S]*{%\-?\s*endschema\s*\-?%})/mi;
 
   #preCheckOk = false;
 
-  // New field to store which extension to use
-  #schemaExt = 'js';
+  // Schema file loader — owns ESM detection, extension fallback, and dynamic import.
+  #loader = null;
 
-  // Track if the project is using ES modules
-  #isESM = false;
+  // Schema compiler — owns shape validation, uniqueness checks, and legacy transforms.
+  #compiler = null;
+
+  // Liquid-file writer — owns buildSchema / buildBlockSchema / writeCode / writeCodeShort.
+  #writer = null;
 
   // Logger instance
   logger = null;
@@ -63,20 +68,15 @@ class Schematic {
       this.#opts = opts;
     }
 
-    // Initialize logger
     this.logger = new Logger(this.#opts.verbose);
-
-    // Check package.json for "type" to detect ESM projects
-    try {
-      const pkgPath = path.resolve(process.cwd(), 'package.json');
-      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
-      if (pkg.type === 'module') {
-        this.#schemaExt = 'cjs';
-        this.#isESM = true;
-      }
-    } catch {
-      // fallback to CommonJS defaults
-    }
+    this.#loader = new SchemaLoader();
+    this.#compiler = new SchemaCompiler({ logger: this.logger, loader: this.#loader });
+    this.#writer = new SchemaWriter({
+      opts: this.#opts,
+      logger: this.logger,
+      loader: this.#loader,
+      compiler: this.#compiler,
+    });
   }
 
   envDefaults() {
@@ -97,57 +97,6 @@ class Schematic {
     if (process.env.SCHEMATIC_PATH_THEME_BLOCKS_SCHEMA) this.#opts.paths.themeBlocksSchema = String(process.env.SCHEMATIC_PATH_THEME_BLOCKS_SCHEMA).trim();
   }
 
-  /**
-   * Resolve schema file path with extension fallback
-   * In ESM projects, prefers .cjs, then falls back to .js/.mjs
-   * In CommonJS projects, prefers .js, then falls back to .cjs/.mjs
-   * @param {string} basePath - Path without extension
-   * @param {string} sectionName - For error messages
-   * @returns {string} - Resolved path
-   * @throws {Error} - If no matching file found
-   */
-  #resolveSchemaPath(basePath, sectionName) {
-    const extensions = this.#isESM
-      ? ['.cjs', '.js', '.mjs']  // ESM: prefer .cjs, fallback to .js/.mjs
-      : ['.js', '.cjs', '.mjs']; // CommonJS: prefer .js, fallback to others
-
-    const searchedPaths = [];
-    for (const ext of extensions) {
-      const fullPath = basePath + ext;
-      searchedPaths.push(fullPath);
-      if (fs.existsSync(fullPath)) {
-        return fullPath;
-      }
-    }
-
-    // Build helpful error message
-    const pathList = searchedPaths.map(p => `  - ${p}`).join('\n');
-    let hint = '';
-    if (this.#isESM) {
-      hint = `\n\nHint: In ESM projects (type: module), schema files can be:
-  - .cjs (CommonJS - recommended)
-  - .js (ESM with export default)
-  - .mjs (ESM)`;
-    }
-
-    throw new Error(`Schema file not found for "${sectionName}"\n\nSearched paths:\n${pathList}${hint}`);
-  }
-
-  /**
-   * Load a schema file. Works uniformly for .cjs, .mjs, and .js in either
-   * CJS or ESM projects — Node 20+'s ESM loader handles CJS interop by
-   * wrapping `module.exports` as the `default` export of the returned
-   * namespace. We peel `.default` when present (CJS files and ESM files
-   * that use `export default {...}`) and fall back to the namespace itself
-   * for ESM files that use only named exports.
-   *
-   * @param {string} filePath - Absolute path to schema file
-   * @returns {Promise<object>} - The schema object (or namespace fallback)
-   */
-  async #loadSchemaFile(filePath) {
-    const mod = await import(pathToFileURL(filePath).href);
-    return mod.default || mod;
-  }
 
   // Helper to convert absolute paths to relative for cleaner output
   relativePath(absolutePath) {
@@ -332,8 +281,8 @@ class Schematic {
 
     const sourceFiles = await fs.readdir(localePath);
     for (const sourceFile of sourceFiles) {
-      // Replace `.${this.#schemaExt}` with `.json`
-      const localeFilename = sourceFile.replace(`.${this.#schemaExt}`, '.json');
+      // Replace `.${this.#loader.schemaExt}` with `.json`
+      const localeFilename = sourceFile.replace(`.${this.#loader.schemaExt}`, '.json');
       const sourceLocalePath = path.resolve(localePath, sourceFile);
       const targetLocalePath = path.resolve(this.#opts.paths.locales, localeFilename);
 
@@ -373,7 +322,7 @@ class Schematic {
     const settingsSchemaBase = path.resolve(this.#opts.paths.schema, 'settings_schema');
     let settingsSchema;
     try {
-      settingsSchema = this.#resolveSchemaPath(settingsSchemaBase, 'settings_schema');
+      settingsSchema = this.#loader.resolveSchemaPath(settingsSchemaBase, 'settings_schema');
       this.logger.info(`Found settings schema: ${settingsSchema}`);
     } catch (err) {
       // No settings_schema file - this is optional, not an error
@@ -425,8 +374,8 @@ class Schematic {
       section: `${this.#opts.paths.sections}/${filename}.liquid`,
       snippet: `${this.#opts.paths.snippets}/${filename}.liquid`,
       block: `${this.#opts.paths.blocks}/${filename}.liquid`,
-      schema: `${this.#opts.paths.schema}/${filename}.${this.#schemaExt}`,
-      blockSchema: `${this.#opts.paths.themeBlocksSchema}/${filename}.${this.#schemaExt}`,
+      schema: `${this.#opts.paths.schema}/${filename}.${this.#loader.schemaExt}`,
+      blockSchema: `${this.#opts.paths.themeBlocksSchema}/${filename}.${this.#loader.schemaExt}`,
     };
 
     for (const [type, file] of Object.entries(files)) {
@@ -800,414 +749,38 @@ app.run();
     this.printSummary();
   }
 
-  async compileSchema(file, type = 'section') {
-    let schema;
-
-    try {
-      schema = await this.#loadSchemaFile(file);
-    }
-    catch(err) {
-      this.logger.schemaError(
-        file,
-        err.message,
-        'Failed to load schema file - check for syntax errors'
-      );
-      return false;
-    }
-
-    // Valid shapes:
-    //   type === 'schema' (settings_schema.js) → array (Shopify's settings_schema.json is a top-level array)
-    //   everything else (section/block/locale)  → plain object
-    if (!schema || typeof schema !== 'object' || (Array.isArray(schema) && type !== 'schema')) {
-      this.logger.schemaError(
-        file,
-        'Schema must export a JavaScript object using module.exports or export default',
-        'Schema compilation'
-      );
-      return false;
-    }
-
-    // Validate unique IDs in section settings
-    if (schema.settings) {
-      const validation = this.validateUniqueIds(schema.settings, file, 'section settings');
-      if (!validation.valid) {
-        return false;
-      }
-    }
-
-    // Validate unique block type/name across blocks, then unique IDs in each block's settings
-    if (schema.blocks) {
-      const blockValidation = this.validateUniqueBlockAttributes(schema.blocks, file);
-      if (!blockValidation.valid) {
-        return false;
-      }
-
-      for (let i = 0; i < schema.blocks.length; i++) {
-        const block = schema.blocks[i];
-        if (block.settings) {
-          const blockType = block.type || `block ${i}`;
-          const validation = this.validateUniqueIds(
-            block.settings,
-            file,
-            `block "${blockType}" settings`
-          );
-          if (!validation.valid) {
-            return false;
-          }
-        }
-      }
-    }
-
-    // transforms for old schema to new shopify schema
-    if (typeof schema.templates !== 'undefined' && type == 'section') {
-      schema['enabled_on'] = {templates: schema.templates};
-      delete schema.templates;
-    }
-
-    return schema;
+  // Delegates to SchemaCompiler. Preserved as a thin wrapper so existing tests
+  // and programmatic users that call `schematic.compileSchema(...)` keep working.
+  compileSchema(file, type = 'section') {
+    return this.#compiler.compile(file, type);
   }
 
   validateUniqueIds(settingsArray, file, context = 'settings') {
-    const ids = new Map(); // Use Map to track first occurrence with index
-    const duplicates = [];
-
-    settingsArray.forEach((setting, index) => {
-      if (setting.id) {
-        if (ids.has(setting.id)) {
-          duplicates.push({
-            id: setting.id,
-            firstPosition: ids.get(setting.id) + 1,
-            duplicatePosition: index + 1,
-            label: setting.label || '(no label)'
-          });
-        } else {
-          ids.set(setting.id, index);
-        }
-      }
-    });
-
-    if (duplicates.length > 0) {
-      this.logger.error(`Duplicate setting IDs found in ${context}`);
-      console.log(this.logger.useColor ? chalk.gray(`   File: ${file}`) : `   File: ${file}`);
-      console.log();
-
-      duplicates.forEach(dup => {
-        const red = this.logger.useColor ? chalk.red : (str) => str;
-        const gray = this.logger.useColor ? chalk.gray : (str) => str;
-
-        console.log(red(`   ✗ "${dup.id}"`));
-        console.log(gray(`     First occurrence: position ${dup.firstPosition}`));
-        console.log(gray(`     Duplicate: position ${dup.duplicatePosition}`));
-        console.log(gray(`     Label: ${dup.label}`));
-        console.log();
-      });
-
-      const yellow = this.logger.useColor ? chalk.yellow : (str) => str;
-      const gray = this.logger.useColor ? chalk.gray : (str) => str;
-
-      console.log(yellow('💡 Tip:'), 'Each setting ID must be unique within its scope');
-      console.log(gray('   Rename one of the duplicate IDs to fix this error.'));
-      console.log();
-
-      return { valid: false, duplicates };
-    }
-
-    return { valid: true, duplicates: [] };
+    return this.#compiler.validateUniqueIds(settingsArray, file, context);
   }
 
-  // Shopify rejects sections whose blocks[] has duplicate `type` or duplicate `name`.
-  // See https://shopify.dev/docs/storefronts/themes/architecture/sections/section-schema
-  // Blocks without an explicit type/name are skipped for the respective check.
   validateUniqueBlockAttributes(blocks, file) {
-    const byType = new Map();
-    const byName = new Map();
-    const duplicates = [];
-
-    blocks.forEach((block, index) => {
-      if (block.type) {
-        if (byType.has(block.type)) {
-          duplicates.push({
-            kind: 'type',
-            value: block.type,
-            firstPosition: byType.get(block.type) + 1,
-            duplicatePosition: index + 1
-          });
-        }
-        else {
-          byType.set(block.type, index);
-        }
-      }
-
-      if (block.name) {
-        if (byName.has(block.name)) {
-          duplicates.push({
-            kind: 'name',
-            value: block.name,
-            firstPosition: byName.get(block.name) + 1,
-            duplicatePosition: index + 1
-          });
-        }
-        else {
-          byName.set(block.name, index);
-        }
-      }
-    });
-
-    if (duplicates.length > 0) {
-      const kinds = [...new Set(duplicates.map(d => d.kind))].join(' / ');
-      this.logger.error(`Duplicate block ${kinds} found in section blocks`);
-      console.log(this.logger.useColor ? chalk.gray(`   File: ${file}`) : `   File: ${file}`);
-      console.log();
-
-      duplicates.forEach(dup => {
-        const red = this.logger.useColor ? chalk.red : (str) => str;
-        const gray = this.logger.useColor ? chalk.gray : (str) => str;
-
-        console.log(red(`   ✗ block ${dup.kind} "${dup.value}"`));
-        console.log(gray(`     First occurrence: position ${dup.firstPosition}`));
-        console.log(gray(`     Duplicate: position ${dup.duplicatePosition}`));
-        console.log();
-      });
-
-      const yellow = this.logger.useColor ? chalk.yellow : (str) => str;
-      const gray = this.logger.useColor ? chalk.gray : (str) => str;
-
-      console.log(yellow('💡 Tip:'), 'Each block type and name must be unique within a section');
-      console.log(gray('   Shopify rejects sections with duplicate block types or names.'));
-      console.log();
-
-      return { valid: false, duplicates };
-    }
-
-    return { valid: true, duplicates: [] };
+    return this.#compiler.validateUniqueBlockAttributes(blocks, file);
   }
 
+  // Delegates to SchemaWriter. Preserved as thin wrappers so existing tests and
+  // programmatic users that call these methods directly keep working.
   async buildBlockSchema(floc, contents) {
-    if (typeof contents === 'undefined') {
-      contents = await fs.readFile(floc, 'utf-8');
-    }
-
-    const fname = path.basename(floc, '.liquid');
-
-    this.logger.info(`${this.relativePath(floc)}: generating block schema...`);
-
-    let match, importFilename, opts;
-
-    try {
-      [match, importFilename, opts] = contents.match(this.#refSchemaEx);
-    }
-    catch(err) {
-      return this.logger.error(`${this.relativePath(floc)}: ${err.message} - match failed`);
-    }
-
-    const filename = floc.match(/[^\\/]+?(?=\.\w+$)/)[0];
-
-    // if no filename, let's try to derive it from the path
-    if (!importFilename) {
-      importFilename = filename;
-    }
-
-    // Resolve schema path with extension fallback (.cjs, .js, .mjs)
-    const importFileBase = path.resolve(this.#opts.paths.themeBlocksSchema, importFilename);
-    let importFile;
-    try {
-      importFile = this.#resolveSchemaPath(importFileBase, importFilename);
-    } catch {
-      // File not found - likely schematic options instead
-      opts = importFilename;
-      importFilename = filename;
-      const fallbackBase = path.resolve(this.#opts.paths.themeBlocksSchema, importFilename);
-      importFile = this.#resolveSchemaPath(fallbackBase, importFilename);
-    }
-
-    const schema = await this.compileSchema(importFile, 'block');
-
-    if (schema === false) {
-      return this.logger.error('Error compiling schema, abandoning');
-    }
-
-    const newSchema = [
-      '{% schema %}',
-      JSON.stringify(schema, null, 2),
-      '{% endschema %}',
-    ].join('\n');
-
-    let newContents;
-
-    if (this.#replaceSchemaEx.test(contents)) {
-      this.logger.debug('Replacing existing schema...');
-      newContents = contents.replace(this.#replaceSchemaEx, newSchema);
-    }
-    else {
-      this.logger.debug('Setting new schema...');
-      newContents = [
-        contents,
-        newSchema,
-      ].join('\n');
-    }
-
-    this.logger.success('✓ Block schema generated');
-
-    return newContents;
+    return this.#writer.buildBlockSchema(floc, contents);
   }
 
   async buildSchema(floc, contents) {
-    if (typeof contents === 'undefined') {
-      contents = await fs.readFile(floc, 'utf-8');
-    }
-
-    const fname = path.basename(floc, '.liquid');
-
-    this.logger.info(`${this.relativePath(floc)}: generating schema...`);
-
-    let match, importFilename, opts;
-
-    try {
-      [match, importFilename, opts] = contents.match(this.#refSchemaEx);
-    }
-    catch(err) {
-      return this.logger.error(`${this.relativePath(floc)}: ${err.message} - match failed`);
-    }
-
-    const filename = floc.match(/[^\\/]+?(?=\.\w+$)/)[0];
-
-    // if no filename, let's try to derive it from the path
-    if (!importFilename) {
-      importFilename = filename;
-    }
-
-    // Resolve schema path with extension fallback (.cjs, .js, .mjs)
-    const importFileBase = path.resolve(this.#opts.paths.schema, importFilename);
-    let importFile;
-    try {
-      importFile = this.#resolveSchemaPath(importFileBase, importFilename);
-    } catch {
-      // File not found - likely schematic options instead
-      opts = importFilename;
-      importFilename = filename;
-      const fallbackBase = path.resolve(this.#opts.paths.schema, importFilename);
-      importFile = this.#resolveSchemaPath(fallbackBase, importFilename);
-    }
-
-    const schema = await this.compileSchema(importFile);
-
-    if (schema === false) {
-      return this.logger.error('Error compiling schema, abandoning');
-    }
-
-    const newSchema = [
-      '{% schema %}',
-      JSON.stringify(schema, null, 2),
-      '{% endschema %}',
-    ].join('\n');
-
-    let newContents;
-
-    if (this.#replaceSchemaEx.test(contents)) {
-      this.logger.debug('Replacing existing schema...');
-      newContents = contents.replace(this.#replaceSchemaEx, newSchema);
-    }
-    else {
-      this.logger.debug('Setting new schema...');
-      newContents = [
-        contents,
-        newSchema,
-      ].join('\n');
-    }
-
-    if (opts) {
-      opts = opts.split(' ');
-
-      for (let opt of opts) {
-        opt = opt.trim();
-
-        if (opt === 'writeCode') {
-          this.logger.debug('Writing switchboard code...');
-
-          newContents = this.writeCode(newContents, importFilename, schema);
-        }
-
-        // Writes shortened render code {% render 'filename' with section as section %}
-        if (opt === 'writeCodeShort') {
-          this.logger.debug('Writing shortened switchboard code...');
-
-          newContents = this.writeCodeShort(newContents, importFilename, schema);
-        }
-      }
-    }
-
-    this.logger.success('✓ Schema generated');
-
-    return newContents;
+    return this.#writer.buildSchema(floc, contents);
   }
 
   writeCode(contents, importFilename, schema) {
-    let lines = ['id: section.id, '], rendered = '';
-
-    if (schema.settings) {
-      for (const obj of schema.settings) {
-        if (obj.id) {
-          lines.push(`${obj.id}: section.settings.${obj.id},`);
-        }
-      }
-    }
-
-    if (schema.blocks) {
-      lines.push(`blocks: section.blocks`);
-    }
-
-    for (const line of lines) {
-      rendered += `    ${line}\n`;
-    }
-
-    const code = `{%-
-
-  render '${importFilename}',
-${rendered}
--%}
-{%- comment -%} schematic`;
-
-    return this.#replaceUpToFirstMarker(contents, code);
+    return this.#writer.writeCode(contents, importFilename, schema);
   }
 
   writeCodeShort(contents, importFilename, schema) {
-    const code = `{%- render '${importFilename}' with section as section -%}
-
-{%- comment -%} schematic`;
-    return this.#replaceUpToFirstMarker(contents, code);
-  }
-
-  // Replace everything up to and including the FIRST `{% comment %} schematic` marker.
-  //
-  // Behavior change from 2.x:
-  //   2.x matched the LAST marker (an accidental side effect of a greedy regex that
-  //   catastrophically backtracked, fixed in v2.2.7 with preserved semantics). On files
-  //   with multiple markers — most often a user's `{% raw %}` documentation block showing
-  //   an example marker alongside the real one — last-match destroyed everything between
-  //   the markers. First-match preserves user content after the first marker instead.
-  //
-  // Migration: on any valid liquid file with exactly one marker (the overwhelming common
-  // case) output is byte-identical to 2.x. Multi-marker files produce different output;
-  // see CHANGELOG v3.0.0 for details.
-  #replaceUpToFirstMarker(contents, code) {
-    const m = contents.match(/{%-?\s*comment\s*-?%}\s*schematic/i);
-    if (!m) return contents;
-    const end = m.index + m[0].length;
-    return code + contents.slice(end);
+    return this.#writer.writeCodeShort(contents, importFilename, schema);
   }
 };
 
 
-class SchematicHelpers {
-  constructor() {
-    const loader = [commonHelpers, methodHelpers];
-    for (const props of loader) {
-      for (const [key, def] of Object.entries(props)) {
-        this[key] = def;
-      }
-    }
-  }
-}
-
-
-export { Schematic, SchematicHelpers };
+export { Schematic };
