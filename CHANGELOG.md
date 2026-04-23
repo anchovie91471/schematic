@@ -4,6 +4,15 @@ Attempting to be more organized about feature changes between versions.
 ## Unreleased
 - n/a
 
+## 2.2.10
+- **Docs:** README updates to document v2.2.9 functionality and trim stale content.
+  - Added a Node 20 prerequisite note under `## To use`. Users on older Node now see the requirement up front rather than hitting a cryptic install-time error from npm.
+  - Added a `### Shopify CLI integration` subsection under "Other ways to use" explaining the write-skip DX benefit introduced in v2.2.9: schema-only builds no longer trigger re-upload storms when nothing actually changed.
+  - Added a new top-level `## Compile-time validation` section covering both duplicate-setting-ID detection (v2.2.1) and duplicate block `type`/`name` detection (v2.2.9), explicitly noting that Schematic only flags what Shopify itself enforces.
+  - Removed the stale "Schematic has planned support for running on individual configuration and localization files" line — tied to the now-superseded watcher plan.
+  - Removed the `## Testing` section entirely — test details belong in contributor guidance, not user-facing READMEs.
+  - No code changes. 138 tests still passing.
+
 ## 2.2.9
 - **Fix:** Added `engines.node >=20.0.0` to `package.json` to declare the real Node floor
   - The `ora@^9.0.0` dependency has required Node 20+ since it was upgraded, but with no `engines` field on the package itself, users on older Node got a runtime crash on `require('ora')` instead of a clean install-time warning from npm

@@ -10,6 +10,9 @@ Working with syntactically strict JSON in Shopify themes sucks. You can't put sc
 Schematic helps you write Shopify theme schema in JS, not JSON. You can build arrays or objects however you want with normal import/require. Use functions. Do whatever. This is a standalone `node` executable that will compile & swap schema definitions for sections whenever it's run. That means it edits the actual `.liquid` file for simplicity and compatibility with task runners, build managers, Shopify CLI theme serving, and whatever else.
 
 ## To use
+
+**Requirements:** Node.js 20 or newer.
+
 *Install Schematic:*
 ```bash
 npm i -D @anchovie/schematic
@@ -684,6 +687,12 @@ Schematic processes theme blocks **after** sections to prevent upload conflicts 
 ## Other ways to use
 The approach is simple and can be worked into whatever setup you have for dev. Because it writes back to the existing `.liquid` files, be wary of infinite loops when including this in an automatic build step.
 
+### Shopify CLI integration
+
+Schematic plays well with `shopify theme dev`. When a build produces byte-identical output to what's already on disk — which happens on any run where no schemas actually changed — Schematic skips the write entirely instead of touching the file's mtime. This prevents Shopify CLI from re-uploading files that haven't actually changed, so schema-only builds don't trigger a storm of unnecessary theme syncs.
+
+If nothing needed to be written on a given run, the summary reads `Schematic ran: no files changed` instead of the usual generation count.
+
 ### Running on a single section file
 Schematic supports [running](https://github.com/AlleyFord/schematic/issues/4) on a single section file instead of scanning the entire contents of the project. To invoke, run:
 ```bash
@@ -692,7 +701,15 @@ npx schematic section path/to/file
 
 This can also be invoked in code through `Schematic.runSection(filePath)`.
 
-Schematic has planned support for running on individual configuration and localization files.
+
+## Compile-time validation
+
+Before writing schema to your `.liquid` files, Schematic validates a few Shopify hard-error rules so you catch mistakes at build time instead of at theme upload:
+
+- **Duplicate setting IDs** — Shopify requires setting IDs to be unique within a section's settings and within each block's settings. Schematic flags duplicates with file name, setting ID, label, and positions.
+- **Duplicate block `type` or `name`** — Shopify rejects sections whose `blocks[]` contains two blocks with the same `type` or the same `name`. Schematic catches this before you push.
+
+All checks mirror rules Shopify itself enforces. Schematic does not flag patterns that Shopify accepts — for example, setting IDs reused across different block types, or setting IDs shared between a section and its blocks, which are treated as distinct scopes by Shopify and work correctly at runtime.
 
 
 ## Using Schematic for settings_schema.json
@@ -774,40 +791,6 @@ window.app.copy = {
 
 In the above example, `window.app.copy` is coming from the Schematic configuration option for `localization.expression`. The `%%json%%` value in that expression is needed and will be replaced with the localization strings.
 
-
-## Testing
-
-Schematic includes a comprehensive test suite built with Jest to ensure reliability and catch regressions.
-
-### Running Tests
-
-```bash
-# Run all tests
-npm test
-
-# Run tests in watch mode (auto-rerun on file changes)
-npm run test:watch
-
-# Run tests with coverage report
-npm run test:coverage
-```
-
-### Test Structure
-
-Tests are organized in the `__tests__/` directory:
-
-- **Unit tests** (`__tests__/unit/`): Test individual methods and functionality
-  - `schema-compilation.test.js`: Tests schema loading and compilation
-  - `write-code.test.js`: Tests code generation (writeCode and writeCodeShort)
-
-- **Integration tests** (`__tests__/integration/`): Test complete workflows
-  - `regex-patterns.test.js`: Tests magic comment pattern matching
-
-- **Fixtures** (`__tests__/fixtures/`): Sample files for testing
-
-### For Contributors
-
-When submitting pull requests, please ensure all tests pass by running `npm test`. Consider adding tests for any new features or bug fixes.
 
 ## About this fork
 This is a maintained fork of the original [schematic project](https://github.com/AlleyFord/schematic) by [AlleyFord](https://github.com/AlleyFord). Published as `@anchovie/schematic` on npm.
