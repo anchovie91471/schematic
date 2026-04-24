@@ -149,6 +149,41 @@ module.exports = {
 
 **Generating a starter config:** run `npx schematic init` to write a `schematic.config.js` with sensible defaults and helpful comments. Pass `--executable` if you prefer the 2.x-style executable file instead of a config.
 
+### Watch mode
+
+Run `npx schematic watch` to keep Schematic running and rebuild on every schema file change:
+
+```bash
+npx schematic watch
+```
+
+The watcher:
+
+- Runs an initial full build on startup
+- Watches your schema directory (defaults to `./src/schema`, plus `./src/schema/theme-blocks` if it exists)
+- On every save of a `.js` / `.cjs` / `.mjs` schema file, debounces for 150ms, then rebuilds
+- Survives errors — a syntax error in a schema file logs the problem and keeps watching; fix and save, next rebuild works
+- Exits cleanly on Ctrl+C
+
+**Per-save cost:** on a typical theme (<100 sections) rebuilds take single-digit milliseconds. The watcher prints the section count at startup so you know what to expect:
+
+```
+ℹ Watching src/schema (56 sections)
+ℹ Press Ctrl+C to stop
+```
+
+Very large themes (500+ sections) get an informational note about per-save rebuild time; 1000+ sections get a stronger advisory with a pointer to file an issue (v3.1 may add incremental rebuilds if the need surfaces).
+
+**Memory trade-off:** the watcher uses URL-based cache invalidation, which creates a fresh module instance per rebuild. Long-running watch sessions (thousands of edits over a day) accumulate these in Node's module registry — think ~50 KB per module × edits × files. Typical dev sessions are well under any noticeable footprint; if you ever notice it getting sluggish, Ctrl+C and restart clears everything.
+
+**Customizing the debounce window** (programmatic only):
+
+```js
+const { Schematic } = require('@anchovie/schematic');
+const app = new Schematic({ /* ...config */ });
+await app.watch({ debounceMs: 300 });
+```
+
 ### Programmatic use
 
 All three named exports are available in both CommonJS and ES modules:

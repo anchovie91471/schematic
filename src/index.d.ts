@@ -43,6 +43,13 @@ export interface ValidationResult {
 
 export type SchemaType = 'section' | 'block' | 'locale' | 'schema';
 
+// -------------------- Watch mode --------------------
+
+export interface WatchOptions {
+  /** Milliseconds of silence before rebuilding after a file change. Default 150. */
+  debounceMs?: number;
+}
+
 // -------------------- Errors --------------------
 
 /** Thrown by `preCheck()` when required theme directories are missing. */
@@ -213,6 +220,24 @@ export declare class Schematic {
 
   /** Rewrite the localization snippet if present. Called from `buildLocales()`. */
   writeLocalization(): Promise<void>;
+
+  /**
+   * Start watch mode. Runs an initial full build, then watches schema
+   * directories for changes and rebuilds on save. Returns a Promise that
+   * resolves when the watcher is stopped via SIGINT/SIGTERM.
+   */
+  watch(options?: WatchOptions): Promise<void>;
+
+  /**
+   * Invalidate the schema-file module cache. The next `compileSchema()`
+   * or `run()` call will re-read schema files from disk and return fresh
+   * instances. Used internally by the watcher between rebuilds; can also
+   * be called manually if you embed Schematic in a long-running process.
+   */
+  invalidateCache(): void;
+
+  /** Read-only access to the merged options (paths, localization, verbose). */
+  readonly opts: SchematicConfig;
 
   // Lower-level delegation API (SchemaCompiler / SchemaWriter are internal).
   // These remain on Schematic for backward compatibility with 2.x programmatic use.

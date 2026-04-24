@@ -5,6 +5,7 @@ import { Logger } from './logger.js';
 import { SchemaLoader } from './loader.js';
 import { SchemaCompiler } from './compiler.js';
 import { SchemaWriter } from './writer.js';
+import { Watcher } from './watcher.js';
 
 // Dynamic import for ora. Now that src/ is ESM this could be a static import,
 // but keeping it lazy avoids paying ora's load cost for one-shot non-TTY runs
@@ -789,10 +790,31 @@ class Schematic {
     this.printSummary();
   }
 
+  // Read-only access to the merged opts. Exposed for the Watcher so it can
+  // read paths.schema without reaching into private state.
+  get opts() {
+    return this.#opts;
+  }
+
   // Delegates to SchemaCompiler. Preserved as a thin wrapper so existing tests
   // and programmatic users that call `schematic.compileSchema(...)` keep working.
   compileSchema(file, type = 'section') {
     return this.#compiler.compile(file, type);
+  }
+
+  // Invalidate the schema-file module cache. Watcher calls this between
+  // rebuilds so `await import()` picks up edits to user schema files.
+  // No-op in one-shot CLI mode (tick stays at 0, URLs stable, no leak).
+  invalidateCache() {
+    this.#loader.bumpCacheTick();
+  }
+
+  // Start watch mode. Returns a promise that resolves when the user stops
+  // the watcher (SIGINT/SIGTERM). Used by `npx schematic watch`; can also
+  // be called programmatically for custom dev-server integrations.
+  async watch(options = {}) {
+    const watcher = new Watcher({ schematic: this, ...options });
+    return watcher.start();
   }
 
   validateUniqueIds(settingsArray, file, context = 'settings') {

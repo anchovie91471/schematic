@@ -162,6 +162,39 @@ Adds a new optional configuration path: users can create `schematic.config.{js,c
 - `npx schematic init` → generates `schematic.config.js`
 - `npx schematic init --executable` → generates `./schematic` executable (2.x-style)
 
+### Phase 6.3 — Watcher (last v3.0.0 feature)
+
+`npx schematic watch` keeps Schematic running and rebuilds on every schema file save. This is the v2.3.0-planned feature that rolled into v3.0.0 when we pivoted to core modernization first; it's the reason the `v3.0.0-dev` branch was originally opened.
+
+- **Added:** `watch` CLI subcommand. Citty-registered alongside `build`/`scaffold`/`section`/`init`.
+- **Added:** `chokidar@^5.0.0` as a runtime dependency. Chokidar v5 is ESM-only — loaded via lazy dynamic `import()` inside `src/watcher.js` (same pattern as `ora` for the CJS bundle's compatibility).
+- **Added:** `src/watcher.js` — `Watcher` class (internal, not exposed on public API). Composes Schematic + chokidar. Handles the single-flight guard, debouncing (150ms default), startup banner, section-count advisory, graceful shutdown on SIGINT/SIGTERM.
+- **Added:** `Schematic#watch(options?)` public method — constructs a `Watcher` and returns a promise that resolves when the user stops it. Options: `{ debounceMs }`.
+- **Added:** `Schematic#invalidateCache()` public method. Evicts schema modules from both Node's CJS cache (`require.cache` delete by resolved path) AND Node's ESM cache (URL-bump via query string). One-shot CLI runs keep the tick at 0 and pay zero cost; watcher rebuilds bump between runs.
+- **Added:** `Schematic` gets a read-only `opts` getter for internal compositions (Watcher needs to read `paths.schema`).
+- **Added:** `scripts/bench-sections.mjs` — synthetic theme benchmark at 25/50/100/200/500/1000 sections. Run with `node scripts/bench-sections.mjs`. Results from 2026-04-23: per-section cold-cache cost converges to ~0.14 ms; Nielsen's 100ms "instant" threshold crosses around 1000 sections. Advisory thresholds in the watcher (500 / 1000 sections) are based directly on these numbers.
+- **Added:** Public types in `src/index.d.ts` — `WatchOptions` interface, `Schematic#watch(options?)` method signature, `Schematic#invalidateCache()`, `Schematic#opts` read-only property.
+- **Archived:** `.plans/2026-04-21-watch-mode-incremental.md` moved to `.plans/archive/`. That plan specified incremental-per-file rebuilds; v3.0.0 ships full-rebuild-per-save because phase 5 made the full rebuild fast enough (sub-100ms for themes under 650 sections). Incremental rebuild is a v3.1+ candidate if real-world large-theme feedback surfaces.
+
+**Cache-invalidation implementation detail:** Node's ESM-to-CJS interop creates a cache dual-headedness that isn't obvious until you hit it. `await import('file://path/to/foo.js?v=2')` in Node creates a fresh ESM module *instance* under the bumped URL — but when Node's ESM loader detects `.js` in a CJS project, it delegates to the CJS loader, which caches by resolved path and ignores URL query strings entirely. Result: URL-bumping alone doesn't pick up CJS schema edits. Phase 6.3's loader calls both `delete require.cache[resolved]` AND appends the URL query string, covering both caches. Both are cheap; the belt-and-suspenders approach avoids extension-detection branches.
+
+**Test coverage:** 6 new tests in `__tests__/unit/cache-invalidation.test.js` covering API surface (method exists on `Schematic`, `opts` getter, `watch` method present, idempotent-before-any-loads, safe-between-loads, basic compile still works against dist). Full end-to-end invalidation-then-fresh-reload is manually verified — Jest's internal module resolution doesn't mirror runtime ESM cache behavior reliably enough to automate it. 3 new assertions in `dist-smoke.test.js` covering `watch` in the subcommand list and `app.watch()` wiring in `bin/schematic`.
+
+**Manual verification sequence** (all confirmed working):
+1. Create a temp theme with one section
+2. `npx schematic watch` shows initial build + startup banner + section count
+3. Edit the schema file — watcher detects, rebuilds, writes new content to `.liquid`
+4. Re-edit — still picks up changes (cache invalidation works across multiple rebuilds)
+5. Ctrl+C — prints "Received SIGINT, stopping watcher..." and exits cleanly
+
+**Total after phase 6.3: 161 tests passing** (154 + 6 cache-invalidation + 1 watch-wiring net of the refined banner-check assertion).
+
+---
+
+## Phase 6.3 closes v3.0.0
+
+All planned v3.0.0 work is now committed on the `v3.0.0-dev` branch. Ready for a release cut whenever the maintainer approves.
+
 ## 2.2.10
 - **Docs:** README updates to document v2.2.9 functionality and trim stale content.
   - Added a Node 20 prerequisite note under `## To use`. Users on older Node now see the requirement up front rather than hitting a cryptic install-time error from npm.

@@ -62,13 +62,16 @@ describe('dist/ build smoke test', () => {
     expect(mjs).toMatch(/export\s*\{[^}]*\bLogger\b[^}]*\}/);
   });
 
-  test('ESM output does NOT contain the phase-2.5 createRequire banner', () => {
+  test('ESM output does NOT contain the phase-2.5 esbuild createRequire banner', () => {
     const mjs = fs.readFileSync(distMjs, 'utf8');
-    // Phase 3 converted src/ to native ESM, so the createRequire shim that
-    // phase-2.5 added to make CJS-style requires work inside ESM output is
-    // no longer needed. If this assertion starts failing, something regressed
-    // to CJS-style requires in src/.
-    expect(mjs).not.toMatch(/createRequire/);
+    // Phase 3 converted src/ to native ESM, removing the createRequire shim
+    // that esbuild injected in phase 2.5. The `__esbuildCreateRequire`
+    // identifier is unique to that shim — its absence confirms source is
+    // still native ESM (no regression to CJS-style requires in src/).
+    // Note: phase 6.3's loader.js uses createRequire legitimately for
+    // `require.cache` eviction during watcher cache-invalidation — that's
+    // an intentional `import { createRequire } from 'node:module'` in the
+    // source code, not the esbuild shim.
     expect(mjs).not.toMatch(/__esbuildCreateRequire/);
   });
 
@@ -108,13 +111,20 @@ describe('dist/ build smoke test', () => {
       path.resolve(__dirname, '../../bin/schematic'),
       'utf8'
     );
-    // Citty subcommands: build (+ default), scaffold, section, init
+    // v3.0.0 subcommands: build (+ default), scaffold, section, init, watch
     expect(binContents).toMatch(/name:\s*['"]build['"]/);
     expect(binContents).toMatch(/name:\s*['"]scaffold['"]/);
     expect(binContents).toMatch(/name:\s*['"]section['"]/);
     expect(binContents).toMatch(/name:\s*['"]init['"]/);
-    // `watch` does NOT exist yet — that's phase 6.3. Guard against accidental addition.
-    expect(binContents).not.toMatch(/name:\s*['"]watch['"]/);
+    expect(binContents).toMatch(/name:\s*['"]watch['"]/);
+  });
+
+  test('bin/schematic wires watch subcommand to app.watch()', () => {
+    const binContents = fs.readFileSync(
+      path.resolve(__dirname, '../../bin/schematic'),
+      'utf8'
+    );
+    expect(binContents).toMatch(/app\.watch\(/);
   });
 
   test('init subcommand exposes the --executable flag (phase 6.2)', () => {

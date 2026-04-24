@@ -194,6 +194,17 @@ function wrapRun(runFn) {
     }),
   });
 
+  const watchCommand = defineCommand({
+    meta: {
+      name: 'watch',
+      description: 'Run continuously, rebuilding on every schema file change',
+    },
+    args: { ...sharedArgs },
+    run: wrapRun(async (app) => {
+      await app.watch();
+    }),
+  });
+
   const initCommand = defineCommand({
     meta: {
       name: 'init',
@@ -232,7 +243,7 @@ function wrapRun(runFn) {
     run: async (ctx) => {
       const firstArg = process.argv[2];
       const hasSubcommand = firstArg && !firstArg.startsWith('-')
-        && ['build', 'scaffold', 'section', 'init'].includes(firstArg);
+        && ['build', 'scaffold', 'section', 'init', 'watch'].includes(firstArg);
       if (hasSubcommand) return; // Subcommand handler will run separately.
       return buildRun(ctx);
     },
@@ -241,6 +252,7 @@ function wrapRun(runFn) {
       scaffold: scaffoldCommand,
       section: sectionCommand,
       init: initCommand,
+      watch: watchCommand,
     },
   });
 
