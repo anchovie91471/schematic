@@ -9,6 +9,40 @@ Working with syntactically strict JSON in Shopify themes sucks. You can't put sc
 ## Schematic helps
 Schematic helps you write Shopify theme schema in JS, not JSON. You can build arrays or objects however you want with normal import/require. Use functions. Do whatever. This is a standalone `node` executable that will compile & swap schema definitions for sections whenever it's run. That means it edits the actual `.liquid` file for simplicity and compatibility with task runners, build managers, Shopify CLI theme serving, and whatever else.
 
+## Migrating from 2.x
+
+Two behavior changes in 3.0.0 worth knowing about. Both are targeted at edge cases most users won't hit.
+
+### 1. Multi-marker liquid files now preserve content after the first marker
+
+Schematic rewrites section `.liquid` files by replacing content up to the `{% comment %} schematic {% endcomment %}` marker. In 2.x this replacement extended to the **last** marker in the file — destroying everything in between. In 3.0.0 it extends to the **first** marker instead, preserving anything that appears after it.
+
+**Who's affected:** files containing the marker more than once — typically `{% raw %}` documentation blocks showing an example marker alongside the real one. In 2.x the documentation would have been silently deleted on every build; in 3.0.0 it survives.
+
+**How to find affected files:** run this from your theme root. Any file reporting >1 marker is one where 3.0.0 will produce different output:
+
+```bash
+grep -rcE '{%-?\s*comment\s*-?%}\s*schematic' sections/ blocks/ | awk -F: '$2 > 1'
+```
+
+### 2. Library code no longer calls `process.exit()` on errors
+
+If you use Schematic programmatically (not via `npx schematic` or a generated executable), `preCheck()` and `init()` now throw typed errors instead of killing the Node process:
+
+```js
+try {
+  await app.preCheck();
+} catch (err) {
+  if (err.code === 'MISSING_DIRECTORIES') {
+    console.log('Missing:', err.missing);  // string[]
+  }
+}
+```
+
+Error codes: `MISSING_DIRECTORIES` (from `preCheck()`), `FILE_EXISTS` and `INIT_WRITE_FAILED` (from `init()`).
+
+**If you invoke Schematic via the CLI, nothing visible changes** — the CLI catches these errors and shows the same messages. The one behavior difference: CLI errors now exit with code **1** instead of code **0**, so CI pipelines will correctly report Schematic failures as failures. Pipelines that were silently green on broken builds may start reporting failures accurately.
+
 ## To use
 
 **Requirements:** Node.js 20 or newer.
@@ -64,6 +98,43 @@ const app = new Schematic({
   verbose: false, // show summary by default; set to true for detailed output with all file paths
 });
 ```
+
+### Programmatic use
+
+All three named exports are available in both CommonJS and ES modules:
+
+```js
+// CommonJS
+const { Schematic, app, Logger } = require('@anchovie/schematic');
+
+// ESM
+import { Schematic, app, Logger } from '@anchovie/schematic';
+```
+
+- **`Schematic`** — the main class you instantiate to run compilation.
+- **`app`** — a pre-instantiated helper object used inside your schema files (see [Built-in components and functions](#built-in-components-and-functions)).
+- **`Logger`** — the same logger Schematic uses internally, exposed so custom tooling built on top of Schematic can match the same output style. Instantiate with `new Logger(verbose)` and call `.info()` / `.success()` / `.warn()` / `.error()` / `.debug()`.
+
+### TypeScript
+
+Type declarations ship with the package — no separate `@types/...` install needed. Your editor picks them up automatically:
+
+```ts
+import { Schematic, SchematicConfig } from '@anchovie/schematic';
+
+const config: SchematicConfig = {
+  paths: {
+    schema: './src/schema',
+    sections: './sections',
+    // autocompleted
+  },
+};
+
+const app = new Schematic(config);
+await app.run();
+```
+
+Public types include `SchematicConfig`, `SchematicPaths`, `SchematicLocalization`, the `Schematic` class, the `Logger` class, `SchematicApp` (the `app` helper shape — methods are tightly typed; data bags like `types` and `templates` are left loose for now), and the three error types (`MissingDirectoriesError`, `FileExistsError`, `InitWriteFailedError`) with `err.code` discriminants for structured error handling.
 
 ## Module System Support
 
