@@ -65,7 +65,24 @@ class Schematic {
 
   constructor(opts = null) {
     if (opts) {
-      this.#opts = opts;
+      // Deep-merge user opts with defaults so partial configs work. In 2.x,
+      // assigning `this.#opts = opts` REPLACED defaults entirely, meaning any
+      // omitted key became undefined. Config discovery (phase 6.2) makes
+      // partial configs common — users often override only one or two paths.
+      // The merge preserves unspecified defaults for every key.
+      this.#opts = {
+        ...this.#opts,
+        ...opts,
+        paths: { ...this.#opts.paths, ...(opts.paths || {}) },
+        // `localization: null` = explicit opt-out (writeLocalization skips).
+        // Undefined = inherit defaults. Object = merge with defaults.
+        localization:
+          opts.localization === null
+            ? null
+            : opts.localization === undefined
+              ? this.#opts.localization
+              : { ...this.#opts.localization, ...opts.localization },
+      };
     }
 
     this.logger = new Logger(this.#opts.verbose);
@@ -166,7 +183,7 @@ class Schematic {
   }
 
   async writeLocalization() {
-    if(this.#opts.localization === undefined){
+    if (this.#opts.localization === undefined || this.#opts.localization === null) {
       this.logger.debug('Checking for localization... nothing to do');
       return;
     }
@@ -429,21 +446,8 @@ class Schematic {
     }
   }
 
-  async init(filename = 'schematic') {
-    // Remove any extension if provided
-    filename = filename.replace(/\.(js|cjs|mjs)$/, '');
-
-    const filePath = path.resolve(process.cwd(), filename);
-
-    // Check if file already exists
-    if (fs.existsSync(filePath)) {
-      const err = new Error(`File already exists: ${filename}`);
-      err.code = 'FILE_EXISTS';
-      err.filename = filename;
-      throw err;
-    }
-
-    // Detect project module type from package.json
+  async init(filename, { executable = false } = {}) {
+    // Detect project module type from package.json (drives template syntax).
     let isESModule = false;
     try {
       const pkgPath = path.resolve(process.cwd(), 'package.json');
@@ -455,62 +459,98 @@ class Schematic {
       // Default to CommonJS if can't read package.json
     }
 
-    // Generate the executable template based on module type
-    const template = isESModule
-      ? `#!/usr/bin/env node
-import { Schematic } from '@anchovie/schematic';
+    // Default filename depends on mode:
+    //   - config file (default): schematic.config.js (c12 auto-discovers)
+    //   - executable (--executable): schematic (no extension, chmod +x)
+    if (!filename) {
+      filename = executable ? 'schematic' : 'schematic.config.js';
+    }
+    else if (executable) {
+      // Executable: strip any extension the user provided so the shebang file
+      // stays extension-less (matches 2.x behavior of `init my-builder.js`).
+      filename = filename.replace(/\.(js|cjs|mjs)$/, '');
+    }
+    // For config files, the user's filename is used verbatim (they may want
+    // `my-project.config.js` or just `.schematicrc.json` — their choice).
 
-// Customize paths below to match your theme structure
-const app = new Schematic({
-  paths: {
-    config: './config',           // Shopify config directory
-    sections: './sections',       // Section files
-    snippets: './snippets',       // Snippet files
-    blocks: './blocks',           // Theme block files (optional)
-    locales: './locales',         // Locale JSON files
-    schema: './src/schema',       // Schema definitions
-    themeBlocksSchema: './src/schema/theme-blocks',  // Block schema (optional)
-  },
-  verbose: false,  // Set to true for detailed output with file paths
-});
+    const filePath = path.resolve(process.cwd(), filename);
 
-app.run();
-`
-      : `#!/usr/bin/env node
-const { Schematic } = require('@anchovie/schematic');
+    if (fs.existsSync(filePath)) {
+      const err = new Error(`File already exists: ${filename}`);
+      err.code = 'FILE_EXISTS';
+      err.filename = filename;
+      throw err;
+    }
 
-// Customize paths below to match your theme structure
-const app = new Schematic({
-  paths: {
-    config: './config',           // Shopify config directory
-    sections: './sections',       // Section files
-    snippets: './snippets',       // Snippet files
-    blocks: './blocks',           // Theme block files (optional)
-    locales: './locales',         // Locale JSON files
-    schema: './src/schema',       // Schema definitions
-    themeBlocksSchema: './src/schema/theme-blocks',  // Block schema (optional)
-  },
-  verbose: false,  // Set to true for detailed output with file paths
-});
+    let template;
+    if (executable) {
+      template = this.#renderExecutableTemplate(isESModule);
+    } else {
+      template = this.#renderConfigTemplate(isESModule);
+    }
 
-app.run();
-`;
-
-    // Write the file, make it executable. Any underlying fs error bubbles up
-    // to bin/schematic's top-level catch with its original message preserved.
     try {
       await fs.writeFile(filePath, template);
-      await fs.chmod(filePath, '755');
+      if (executable) await fs.chmod(filePath, '755');
     }
     catch(err) {
-      const wrapped = new Error(`Failed to create executable: ${err.message}`);
+      const wrapped = new Error(
+        `Failed to create ${executable ? 'executable' : 'config file'}: ${err.message}`
+      );
       wrapped.code = 'INIT_WRITE_FAILED';
       wrapped.cause = err;
       throw wrapped;
     }
 
-    this.logger.success(`Created executable: ${filename}`);
-    console.log(`\n  Run it with: ./${filename}\n`);
+    if (executable) {
+      this.logger.success(`Created executable: ${filename}`);
+      console.log(`\n  Run it with: ./${filename}\n`);
+    } else {
+      this.logger.success(`Created config: ${filename}`);
+      console.log(`\n  Run it with: npx schematic\n`);
+    }
+  }
+
+  #renderConfigTemplate(isESModule) {
+    const body = `{
+  paths: {
+    config: './config',                              // Shopify config directory
+    sections: './sections',                          // Section liquid files
+    snippets: './snippets',                          // Snippet liquid files
+    blocks: './blocks',                              // Theme block liquid files (optional)
+    locales: './locales',                            // Locale JSON files
+    schema: './src/schema',                          // Schema definitions
+    themeBlocksSchema: './src/schema/theme-blocks',  // Theme block schema (optional)
+  },
+  verbose: false,  // true for detailed output; false for one-line summary
+
+  // Environment-specific overrides (c12 merges these based on NODE_ENV):
+  // $development: { verbose: true },
+  // $production: { verbose: false },
+}`;
+
+    return isESModule
+      ? `// @anchovie/schematic config. Run with: npx schematic\nexport default ${body};\n`
+      : `// @anchovie/schematic config. Run with: npx schematic\nmodule.exports = ${body};\n`;
+  }
+
+  #renderExecutableTemplate(isESModule) {
+    const body = `{
+  paths: {
+    config: './config',           // Shopify config directory
+    sections: './sections',       // Section files
+    snippets: './snippets',       // Snippet files
+    blocks: './blocks',           // Theme block files (optional)
+    locales: './locales',         // Locale JSON files
+    schema: './src/schema',       // Schema definitions
+    themeBlocksSchema: './src/schema/theme-blocks',  // Block schema (optional)
+  },
+  verbose: false,  // Set to true for detailed output with file paths
+}`;
+
+    return isESModule
+      ? `#!/usr/bin/env node\nimport { Schematic } from '@anchovie/schematic';\n\nconst app = new Schematic(${body});\n\napp.run();\n`
+      : `#!/usr/bin/env node\nconst { Schematic } = require('@anchovie/schematic');\n\nconst app = new Schematic(${body});\n\napp.run();\n`;
   }
 
 

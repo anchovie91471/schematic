@@ -136,6 +136,32 @@ First user-facing feature phase of v3.0.0. **No new subcommands** — this is a 
 
 **Total after phase 6.1: 147 tests passing** (145 + 2 new CLI-surface assertions).
 
+### Phase 6.2 — Config discovery via c12
+
+Adds a new optional configuration path: users can create `schematic.config.{js,cjs,mjs}` (or `.schematicrc.json`, or a `"schematic"` field in `package.json`) and run `npx schematic` without any further setup. Defaults still work with zero config — this is purely additive.
+
+- **Added:** `c12@^4.0.0-beta.4` as a runtime dependency. Chosen for UnJS ecosystem alignment with phase 6.1's Citty choice; the two libraries share design philosophy and author.
+- **Added:** Auto-discovery at `cwd` of the following config files, first match wins:
+  - `schematic.config.js` / `.cjs` / `.mjs`
+  - `.schematicrc` / `.schematicrc.json` / variants
+  - `package.json` → `"schematic"` field
+- **Added:** `--config <path>` CLI flag now works (previously errored with "coming in v3.0.0"). Loads a specific file and bypasses discovery. Useful for `schematic --config=schematic.dev.js` and similar per-environment flows.
+- **Added:** Environment-specific overrides via c12's `$env` pattern — top-level keys like `$development` / `$production` / `$test` are merged based on `NODE_ENV`. Users can have one config file that adjusts verbosity, paths, or any other option per environment without `if` logic.
+- **Changed:** `Schematic` constructor now **deep-merges** user-provided `opts` with built-in defaults. In 2.x, passing `new Schematic({verbose: true})` silently nulled out `paths` and `localization` defaults — only full configs worked. With config discovery landing and partial configs becoming common (users overriding only one path), the constructor had to handle merging properly. `localization: null` is now the explicit opt-out for anyone who previously relied on `localization` being undefined to skip the write.
+- **Changed:** `schematic init` now generates `schematic.config.js` by default. The 2.x behavior (executable file with shebang + `app.run()`) is preserved via the new `--executable` flag. The generated config file includes commented hints about `$development` / `$production` environment overrides.
+- **Changed:** `bin/schematic` refactored so the main `run` guards against firing alongside a matched subcommand's `run` — Citty fires both by default, which caused spurious `preCheck` failures after `init` succeeded. The guard inspects `process.argv[2]` and short-circuits when a known subcommand is present.
+
+**Test coverage:** 7 new tests across `init.test.js` (config mode, executable mode, extension stripping in executable mode only, permissions for each, success messaging) and 2 new assertions in `dist-smoke.test.js` (bin imports c12 with `envName` option; `init` exposes `--executable` flag). 154 tests passing (147 → 154, net +7).
+
+**Manual verification:**
+- `npx schematic` with no config file → runs build with built-in defaults (unchanged)
+- `npx schematic` with `schematic.config.js` present → config auto-loaded, "Loaded config: schematic.config.js" shown in verbose mode
+- `npx schematic --config=./custom.js` → explicit path loaded
+- `npx schematic` with `package.json#schematic` field → field loaded
+- `NODE_ENV=development npx schematic` → `$development` block merged in, overrides base config
+- `npx schematic init` → generates `schematic.config.js`
+- `npx schematic init --executable` → generates `./schematic` executable (2.x-style)
+
 ## 2.2.10
 - **Docs:** README updates to document v2.2.9 functionality and trim stale content.
   - Added a Node 20 prerequisite note under `## To use`. Users on older Node now see the requirement up front rather than hitting a cryptic install-time error from npm.

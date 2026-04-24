@@ -99,6 +99,56 @@ const app = new Schematic({
 });
 ```
 
+### Config file (auto-discovery)
+
+If default paths don't match your theme layout, create a `schematic.config.js` file at your project root:
+
+```js
+// schematic.config.js  (CommonJS)
+module.exports = {
+  paths: {
+    schema: './custom/schema-path',
+    // ...other paths; unspecified keys keep their defaults
+  },
+  verbose: true,
+};
+```
+
+Or the ESM equivalent if your `package.json` has `"type": "module"`:
+
+```js
+// schematic.config.js  (ESM)
+export default {
+  paths: { schema: './custom/schema-path' },
+  verbose: true,
+};
+```
+
+Then run `npx schematic` — the config is auto-loaded before compilation. Supported discovery paths (first match wins):
+
+| File | Format |
+|---|---|
+| `schematic.config.js` / `.cjs` / `.mjs` | JS (ESM or CJS based on project type) |
+| `.schematicrc.json` | JSON |
+| `package.json` → `"schematic"` field | JSON inline |
+
+**Explicit config path:** use `npx schematic --config=./path/to/config.js` to bypass auto-discovery. Useful when you keep per-environment configs (`schematic.dev.config.js`, `schematic.prod.config.js`) side-by-side.
+
+**Environment-specific overrides:** top-level keys like `$development`, `$production`, `$test` are merged based on `NODE_ENV`:
+
+```js
+// schematic.config.js
+module.exports = {
+  verbose: false,
+  $development: { verbose: true },   // merged when NODE_ENV=development
+  $production: { verbose: false },
+};
+```
+
+**Partial configs are supported.** You only specify the paths/settings that differ from defaults — unspecified keys inherit built-in defaults. Pair this with `--config` flags to layer environment-specific overrides cleanly.
+
+**Generating a starter config:** run `npx schematic init` to write a `schematic.config.js` with sensible defaults and helpful comments. Pass `--executable` if you prefer the 2.x-style executable file instead of a config.
+
 ### Programmatic use
 
 All three named exports are available in both CommonJS and ES modules:

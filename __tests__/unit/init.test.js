@@ -7,200 +7,213 @@ describe('Init Command', () => {
   let schematic;
 
   beforeEach(() => {
-    // Create a temporary test directory
     testDir = path.join(__dirname, '../temp-init-test');
     fs.ensureDirSync(testDir);
 
-    // Create schematic instance
     schematic = new Schematic({ verbose: false });
 
-    // Mock process.cwd() to return our test directory
     jest.spyOn(process, 'cwd').mockReturnValue(testDir);
-
-    // Mock process.exit to prevent tests from exiting
     jest.spyOn(process, 'exit').mockImplementation(() => {});
-
-    // Spy on console.log
     jest.spyOn(console, 'log').mockImplementation();
   });
 
   afterEach(() => {
-    // Clean up test directory
     fs.removeSync(testDir);
-
-    // Restore mocks
     jest.restoreAllMocks();
   });
 
-  describe('File creation', () => {
-    it('should create file with default name "schematic"', async () => {
+  // ───────────────────────── config file mode (default in v3.0.0) ─────────────────────────
+
+  describe('config file mode (default)', () => {
+    it('creates schematic.config.js with no filename argument', async () => {
       await schematic.init();
 
-      const filePath = path.join(testDir, 'schematic');
+      const filePath = path.join(testDir, 'schematic.config.js');
       expect(fs.existsSync(filePath)).toBe(true);
     });
 
-    it('should create file with custom name', async () => {
-      await schematic.init('my-builder');
+    it('creates a custom-named config file when filename is provided', async () => {
+      await schematic.init('my-project.config.js');
 
-      const filePath = path.join(testDir, 'my-builder');
-      expect(fs.existsSync(filePath)).toBe(true);
+      expect(fs.existsSync(path.join(testDir, 'my-project.config.js'))).toBe(true);
     });
 
-    it('should strip .js extension from filename', async () => {
-      await schematic.init('my-builder.js');
+    it('does NOT strip extensions in config mode (user filename is verbatim)', async () => {
+      await schematic.init('custom.config.js');
 
-      const filePath = path.join(testDir, 'my-builder');
-      expect(fs.existsSync(filePath)).toBe(true);
-      expect(fs.existsSync(path.join(testDir, 'my-builder.js'))).toBe(false);
+      expect(fs.existsSync(path.join(testDir, 'custom.config.js'))).toBe(true);
+      expect(fs.existsSync(path.join(testDir, 'custom.config'))).toBe(false);
     });
 
-    it('should strip .cjs extension from filename', async () => {
-      await schematic.init('my-builder.cjs');
-
-      const filePath = path.join(testDir, 'my-builder');
-      expect(fs.existsSync(filePath)).toBe(true);
-      expect(fs.existsSync(path.join(testDir, 'my-builder.cjs'))).toBe(false);
-    });
-
-    it('should strip .mjs extension from filename', async () => {
-      await schematic.init('my-builder.mjs');
-
-      const filePath = path.join(testDir, 'my-builder');
-      expect(fs.existsSync(filePath)).toBe(true);
-      expect(fs.existsSync(path.join(testDir, 'my-builder.mjs'))).toBe(false);
-    });
-  });
-
-  describe('File existence checking', () => {
-    it('should throw FILE_EXISTS error if file already exists', async () => {
-      // Create a file first
-      const filePath = path.join(testDir, 'schematic');
-      fs.writeFileSync(filePath, 'existing content');
-
-      await expect(schematic.init('schematic')).rejects.toMatchObject({
-        code: 'FILE_EXISTS',
-        filename: 'schematic',
-        message: expect.stringContaining('File already exists'),
-      });
-    });
-  });
-
-  describe('File permissions', () => {
-    it('should make file executable', async () => {
+    it('writes CommonJS syntax by default (no package.json)', async () => {
       await schematic.init();
 
-      const filePath = path.join(testDir, 'schematic');
-      const stats = fs.statSync(filePath);
-
-      // Check if file has execute permission (mode includes 0o111)
-      const mode = stats.mode & parseInt('777', 8);
-      const hasExecute = (mode & parseInt('111', 8)) !== 0;
-
-      expect(hasExecute).toBe(true);
-    });
-  });
-
-  describe('Template content', () => {
-    it('should contain shebang', async () => {
-      await schematic.init();
-
-      const filePath = path.join(testDir, 'schematic');
-      const content = fs.readFileSync(filePath, 'utf-8');
-
-      expect(content).toContain('#!/usr/bin/env node');
+      const content = fs.readFileSync(path.join(testDir, 'schematic.config.js'), 'utf-8');
+      expect(content).toContain('module.exports = {');
+      expect(content).not.toContain('export default');
     });
 
-    it('should contain require statement for CommonJS projects', async () => {
-      // No package.json, defaults to CommonJS
-      await schematic.init();
+    it('writes ESM syntax when package.json has "type": "module"', async () => {
+      fs.writeFileSync(path.join(testDir, 'package.json'), JSON.stringify({ type: 'module' }));
 
-      const filePath = path.join(testDir, 'schematic');
-      const content = fs.readFileSync(filePath, 'utf-8');
-
-      expect(content).toContain("const { Schematic } = require('@anchovie/schematic');");
-    });
-
-    it('should contain import statement for ES module projects', async () => {
-      // Create package.json with "type": "module"
-      const pkgPath = path.join(testDir, 'package.json');
-      fs.writeFileSync(pkgPath, JSON.stringify({ type: 'module' }));
-
-      // Create new schematic instance to pick up the package.json
       const esSchematic = new Schematic({ verbose: false });
       jest.spyOn(process, 'cwd').mockReturnValue(testDir);
-
       await esSchematic.init();
 
-      const filePath = path.join(testDir, 'schematic');
-      const content = fs.readFileSync(filePath, 'utf-8');
-
-      expect(content).toContain("import { Schematic } from '@anchovie/schematic';");
-      expect(content).not.toContain('require');
+      const content = fs.readFileSync(path.join(testDir, 'schematic.config.js'), 'utf-8');
+      expect(content).toContain('export default {');
+      expect(content).not.toContain('module.exports');
     });
 
-    it('should contain default paths configuration', async () => {
+    it('contains default paths configuration', async () => {
       await schematic.init();
 
-      const filePath = path.join(testDir, 'schematic');
-      const content = fs.readFileSync(filePath, 'utf-8');
-
+      const content = fs.readFileSync(path.join(testDir, 'schematic.config.js'), 'utf-8');
       expect(content).toContain('paths: {');
       expect(content).toContain("config: './config'");
       expect(content).toContain("sections: './sections'");
-      expect(content).toContain("snippets: './snippets'");
-      expect(content).toContain("blocks: './blocks'");
-      expect(content).toContain("locales: './locales'");
       expect(content).toContain("schema: './src/schema'");
       expect(content).toContain("themeBlocksSchema: './src/schema/theme-blocks'");
     });
 
-    it('should contain verbose: false setting', async () => {
+    it('contains a hint about $development / $production env overrides', async () => {
       await schematic.init();
 
-      const filePath = path.join(testDir, 'schematic');
-      const content = fs.readFileSync(filePath, 'utf-8');
-
-      expect(content).toContain('verbose: false');
+      const content = fs.readFileSync(path.join(testDir, 'schematic.config.js'), 'utf-8');
+      expect(content).toContain('$development');
+      expect(content).toContain('$production');
     });
 
-    it('should contain helpful comments', async () => {
+    it('does NOT contain shebang or app.run() (config files are data, not scripts)', async () => {
       await schematic.init();
 
-      const filePath = path.join(testDir, 'schematic');
-      const content = fs.readFileSync(filePath, 'utf-8');
-
-      expect(content).toContain('// Customize paths below');
-      expect(content).toContain('// Shopify config directory');
-      expect(content).toContain('// Set to true for detailed output');
+      const content = fs.readFileSync(path.join(testDir, 'schematic.config.js'), 'utf-8');
+      expect(content).not.toContain('#!/usr/bin/env node');
+      expect(content).not.toContain('app.run()');
     });
 
-    it('should contain app.run() call', async () => {
+    it('does NOT chmod the config file', async () => {
       await schematic.init();
 
-      const filePath = path.join(testDir, 'schematic');
-      const content = fs.readFileSync(filePath, 'utf-8');
+      const stats = fs.statSync(path.join(testDir, 'schematic.config.js'));
+      const mode = stats.mode & parseInt('777', 8);
+      const hasExecute = (mode & parseInt('111', 8)) !== 0;
+      expect(hasExecute).toBe(false);
+    });
 
-      expect(content).toContain('app.run();');
+    it('shows "Created config" success message and "npx schematic" hint', async () => {
+      const successSpy = jest.spyOn(schematic.logger, 'success');
+
+      await schematic.init();
+
+      expect(successSpy).toHaveBeenCalledWith('Created config: schematic.config.js');
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('npx schematic')
+      );
     });
   });
 
-  describe('Success messaging', () => {
-    it('should show success message with filename', async () => {
-      // Mock logger.success
-      const successSpy = jest.spyOn(schematic.logger, 'success');
+  // ───────────────────────── executable mode (--executable flag) ─────────────────────────
 
-      await schematic.init('my-builder');
+  describe('executable mode (--executable flag)', () => {
+    it('creates ./schematic executable with default name', async () => {
+      await schematic.init(undefined, { executable: true });
 
-      expect(successSpy).toHaveBeenCalledWith('Created executable: my-builder');
+      expect(fs.existsSync(path.join(testDir, 'schematic'))).toBe(true);
     });
 
-    it('should show usage instructions', async () => {
-      await schematic.init('my-builder');
+    it('creates executable with custom name', async () => {
+      await schematic.init('my-builder', { executable: true });
 
+      expect(fs.existsSync(path.join(testDir, 'my-builder'))).toBe(true);
+    });
+
+    it('strips .js extension from custom name (executable has no extension)', async () => {
+      await schematic.init('my-builder.js', { executable: true });
+
+      expect(fs.existsSync(path.join(testDir, 'my-builder'))).toBe(true);
+      expect(fs.existsSync(path.join(testDir, 'my-builder.js'))).toBe(false);
+    });
+
+    it('strips .cjs and .mjs extensions too', async () => {
+      await schematic.init('a.cjs', { executable: true });
+      await schematic.init('b.mjs', { executable: true });
+
+      expect(fs.existsSync(path.join(testDir, 'a'))).toBe(true);
+      expect(fs.existsSync(path.join(testDir, 'b'))).toBe(true);
+    });
+
+    it('chmods the executable file (0o111 set)', async () => {
+      await schematic.init(undefined, { executable: true });
+
+      const stats = fs.statSync(path.join(testDir, 'schematic'));
+      const mode = stats.mode & parseInt('777', 8);
+      const hasExecute = (mode & parseInt('111', 8)) !== 0;
+      expect(hasExecute).toBe(true);
+    });
+
+    it('contains shebang and app.run()', async () => {
+      await schematic.init(undefined, { executable: true });
+
+      const content = fs.readFileSync(path.join(testDir, 'schematic'), 'utf-8');
+      expect(content).toContain('#!/usr/bin/env node');
+      expect(content).toContain('app.run();');
+    });
+
+    it('uses require() for CommonJS projects', async () => {
+      await schematic.init(undefined, { executable: true });
+
+      const content = fs.readFileSync(path.join(testDir, 'schematic'), 'utf-8');
+      expect(content).toContain("require('@anchovie/schematic')");
+      expect(content).not.toContain('import');
+    });
+
+    it('uses import for ESM projects', async () => {
+      fs.writeFileSync(path.join(testDir, 'package.json'), JSON.stringify({ type: 'module' }));
+
+      const esSchematic = new Schematic({ verbose: false });
+      jest.spyOn(process, 'cwd').mockReturnValue(testDir);
+      await esSchematic.init(undefined, { executable: true });
+
+      const content = fs.readFileSync(path.join(testDir, 'schematic'), 'utf-8');
+      expect(content).toContain("import { Schematic } from '@anchovie/schematic'");
+      expect(content).not.toContain('require');
+    });
+
+    it('shows "Created executable" success message', async () => {
+      const successSpy = jest.spyOn(schematic.logger, 'success');
+
+      await schematic.init('my-builder', { executable: true });
+
+      expect(successSpy).toHaveBeenCalledWith('Created executable: my-builder');
       expect(console.log).toHaveBeenCalledWith(
         expect.stringContaining('./my-builder')
       );
+    });
+  });
+
+  // ───────────────────────── error paths ─────────────────────────
+
+  describe('error handling', () => {
+    it('throws FILE_EXISTS for config mode when file already exists', async () => {
+      fs.writeFileSync(path.join(testDir, 'schematic.config.js'), 'existing');
+
+      await expect(schematic.init()).rejects.toMatchObject({
+        code: 'FILE_EXISTS',
+        filename: 'schematic.config.js',
+        message: expect.stringContaining('File already exists'),
+      });
+    });
+
+    it('throws FILE_EXISTS for executable mode when file already exists', async () => {
+      fs.writeFileSync(path.join(testDir, 'schematic'), 'existing');
+
+      await expect(
+        schematic.init(undefined, { executable: true })
+      ).rejects.toMatchObject({
+        code: 'FILE_EXISTS',
+        filename: 'schematic',
+      });
     });
   });
 });

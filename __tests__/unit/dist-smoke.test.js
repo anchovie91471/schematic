@@ -91,6 +91,18 @@ describe('dist/ build smoke test', () => {
     expect(binContents).toMatch(/runMain/);
   });
 
+  test('bin/schematic uses c12 for config discovery (phase 6.2)', () => {
+    const binContents = fs.readFileSync(
+      path.resolve(__dirname, '../../bin/schematic'),
+      'utf8'
+    );
+    expect(binContents).toMatch(/import\(['"]c12['"]\)/);
+    expect(binContents).toMatch(/loadConfig/);
+    // $env-key merging via NODE_ENV is enabled (matches the $development/
+    // $production/$test pattern users see in schematic.config.js templates).
+    expect(binContents).toMatch(/envName/);
+  });
+
   test('bin/schematic declares the expected subcommands', () => {
     const binContents = fs.readFileSync(
       path.resolve(__dirname, '../../bin/schematic'),
@@ -103,5 +115,14 @@ describe('dist/ build smoke test', () => {
     expect(binContents).toMatch(/name:\s*['"]init['"]/);
     // `watch` does NOT exist yet — that's phase 6.3. Guard against accidental addition.
     expect(binContents).not.toMatch(/name:\s*['"]watch['"]/);
+  });
+
+  test('init subcommand exposes the --executable flag (phase 6.2)', () => {
+    const binContents = fs.readFileSync(
+      path.resolve(__dirname, '../../bin/schematic'),
+      'utf8'
+    );
+    expect(binContents).toMatch(/executable:\s*\{/);
+    expect(binContents).toMatch(/args\.executable/);
   });
 });

@@ -19,21 +19,62 @@ const sharedArgs = {
   },
   config: {
     type: 'string',
-    description: 'Path to a schematic config file (coming in v3.0.0 config discovery)',
+    description: 'Path to a config file, bypassing auto-discovery (e.g., --config=./schematic.dev.js)',
   },
 };
 
-function createApp(args) {
-  const app = new Schematic();
+// Load user config via c12 — auto-discovers schematic.config.{js,cjs,mjs},
+// .schematicrc, and package.json#schematic field in cwd. If `--config <path>`
+// is given, loads that file explicitly instead of searching.
+// Returns { config, configFile } where configFile is the absolute path of
+// whichever file was found (null if defaults only).
+async function loadConfiguration(args) {
+  const { loadConfig } = await import('c12');
+
+  if (args.config) {
+    // Explicit override — bypass discovery.
+    const explicitPath = path.resolve(process.cwd(), args.config);
+    const result = await loadConfig({
+      cwd: process.cwd(),
+      configFile: explicitPath,
+      packageJson: false,
+      rcFile: false,
+      envName: process.env.NODE_ENV,
+      omit$Keys: true,
+    });
+    if (!result.configFile) {
+      throw new Error(`Config file not found: ${args.config}`);
+    }
+    return { config: result.config || {}, configFile: result.configFile };
+  }
+
+  // Auto-discovery mode.
+  const result = await loadConfig({
+    cwd: process.cwd(),
+    name: 'schematic', // finds schematic.config.{js,cjs,mjs} + .schematicrc*
+    packageJson: true, // also reads package.json#schematic
+    envName: process.env.NODE_ENV, // merges $development/$production/$test blocks
+    omit$Keys: true, // strip the $env keys from the final shape
+  });
+
+  return { config: result.config || {}, configFile: result.configFile || null };
+}
+
+async function createApp(args) {
+  const { config, configFile } = await loadConfiguration(args);
+
+  // Pass loaded config (possibly empty) to Schematic. Its constructor
+  // deep-merges with built-in defaults for any key the user didn't set.
+  const app = new Schematic(Object.keys(config).length ? config : undefined);
   app.envDefaults();
   if (args.verbose) app.logger.setVerbose(true);
-  if (args.config) {
-    throw new Error(
-      'The --config flag is not yet supported. Config discovery ships with v3.0.0. ' +
-      'For now, generate a custom executable with `npx schematic init` or use ' +
-      'SCHEMATIC_PATH_* environment variables.'
-    );
+
+  // Surface the loaded config path in verbose mode so users can see which
+  // file won when multiple candidates exist.
+  if (configFile && app.logger.verbose) {
+    app.logger.info(`Loaded config: ${path.relative(process.cwd(), configFile) || configFile}`);
   }
+
   return app;
 }
 
@@ -67,10 +108,10 @@ function wrapRun(runFn) {
   return async ({ args }) => {
     let app;
     try {
-      app = createApp(args);
+      app = await createApp(args);
     } catch (err) {
-      // createApp itself can throw (e.g., --config rejection); we don't have
-      // a fully-initialized Schematic yet, so surface a lightweight error.
+      // createApp itself can throw (config file missing/malformed). We don't
+      // have a fully-initialized Schematic yet, so surface a lightweight error.
       console.error(err.message);
       process.exit(1);
     }
@@ -156,19 +197,25 @@ function wrapRun(runFn) {
   const initCommand = defineCommand({
     meta: {
       name: 'init',
-      description: 'Generate a custom executable file for running Schematic',
+      description: 'Generate a schematic.config.js (or an executable with --executable)',
     },
     args: {
       name: {
         type: 'positional',
-        description: 'Filename for the generated executable (default: "schematic")',
+        description: 'Filename to generate (default: schematic.config.js, or schematic with --executable)',
         required: false,
-        default: 'schematic',
+        default: '',
+      },
+      executable: {
+        type: 'boolean',
+        description: 'Generate a Node executable file instead of a config file (2.x-style setup)',
       },
       ...sharedArgs,
     },
     run: wrapRun(async (app, args) => {
-      await app.init(args.name);
+      // `args.name === ''` when user passed no positional — Schematic.init
+      // treats falsy filename as "use the mode-specific default."
+      await app.init(args.name || undefined, { executable: !!args.executable });
     }),
   });
 
@@ -179,9 +226,16 @@ function wrapRun(runFn) {
       description: 'Write Shopify schema with JS, not JSON',
     },
     args: { ...sharedArgs },
-    // No subcommand → default to the build behavior (backward compatible with
-    // 2.x `npx schematic` invocation that runs a full build).
-    run: buildRun,
+    // No subcommand → default to build behavior. Citty fires BOTH the main
+    // `run` AND the matched subcommand's `run` in sequence, so we guard the
+    // default-to-build here: only run if no known subcommand appears on argv.
+    run: async (ctx) => {
+      const firstArg = process.argv[2];
+      const hasSubcommand = firstArg && !firstArg.startsWith('-')
+        && ['build', 'scaffold', 'section', 'init'].includes(firstArg);
+      if (hasSubcommand) return; // Subcommand handler will run separately.
+      return buildRun(ctx);
+    },
     subCommands: {
       build: buildCommand,
       scaffold: scaffoldCommand,
