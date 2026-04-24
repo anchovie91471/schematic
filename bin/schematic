@@ -1,41 +1,42 @@
 #!/usr/bin/env node
 const chalk = require('chalk');
+const { readFileSync } = require('node:fs');
+const path = require('node:path');
 const { Schematic } = require('../dist/index.cjs');
 
-// Simple flag parser
-function parseFlags(args) {
-  const flags = {};
-  const positional = [];
+const pkg = JSON.parse(
+  readFileSync(path.resolve(__dirname, '..', 'package.json'), 'utf-8')
+);
 
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
+// Shared args attached to every subcommand. `--verbose` has no short alias
+// because Citty reserves `-v` for `--version`. `--config` is accepted now
+// but errors out until phase 6.2 ships config discovery, so the CLI surface
+// stabilizes before the feature lands.
+const sharedArgs = {
+  verbose: {
+    type: 'boolean',
+    description: 'Detailed output with all file paths (equivalent to SCHEMATIC_VERBOSE=1)',
+  },
+  config: {
+    type: 'string',
+    description: 'Path to a schematic config file (coming in v3.0.0 config discovery)',
+  },
+};
 
-    if (arg.startsWith('--')) {
-      // Long flag: --short, --block
-      const key = arg.slice(2);
-      flags[key] = true;
-    } else if (arg.startsWith('-') && arg.length === 2) {
-      // Short flag: -s, -b
-      const key = arg.slice(1);
-      flags[key] = true;
-    } else {
-      positional.push(arg);
-    }
+function createApp(args) {
+  const app = new Schematic();
+  app.envDefaults();
+  if (args.verbose) app.logger.setVerbose(true);
+  if (args.config) {
+    throw new Error(
+      'The --config flag is not yet supported. Config discovery ships with v3.0.0. ' +
+      'For now, generate a custom executable with `npx schematic init` or use ' +
+      'SCHEMATIC_PATH_* environment variables.'
+    );
   }
-
-  return { flags, positional };
+  return app;
 }
 
-// Log an error message and exit non-zero. All CLI exits go through here so
-// library code can stay exit-free.
-function bail(msg) {
-  console.error(msg);
-  process.exit(1);
-}
-
-// Format a library-thrown error for display, then exit 1.
-// Known error codes get friendlier formatting; everything else falls back
-// to logger.error + raw message.
 function displayErrorAndExit(app, err) {
   const tip = app.logger.useColor ? chalk.yellow('💡 Tip:') : 'Tip:';
 
@@ -60,50 +61,140 @@ function displayErrorAndExit(app, err) {
   process.exit(1);
 }
 
-// Main async entry point - properly awaits all async methods
-(async () => {
-  const app = new Schematic();
-  app.envDefaults(); // looks at env vars to determine opts
-
-  // Parse command line arguments
-  const args = process.argv.slice(2);
-  const { flags, positional } = parseFlags(args);
-  const [ command, arg ] = positional;
-
-  try {
-    if (command) {
-      if (command === 'scaffold') {
-        if (!arg) bail('scaffold requires a filename [section-name]');
-
-        const short = flags.short || flags.s || false;
-        const blockOnly = flags.block || flags.b || false;
-
-        // Validate flag combinations
-        if (short && blockOnly) {
-          app.logger.error('--short and --block flags cannot be used together');
-          console.log('  --short applies to sections only');
-          process.exit(1);
-        }
-
-        await app.scaffold(arg, short, blockOnly);
-      }
-
-      else if (command === 'section') {
-        if (!arg) bail('section requires a file path');
-
-        await app.runSection(arg);
-      }
-
-      else if (command === 'init') {
-        const filename = arg || 'schematic';  // Default to 'schematic' if no name provided
-        await app.init(filename);
-      }
-
-      else bail(`command not recognized: "${command}". Valid commands are: scaffold, section, init`);
+// Every subcommand's run goes through this wrapper: shared app construction,
+// shared error handling, guaranteed exit-1-on-error behavior.
+function wrapRun(runFn) {
+  return async ({ args }) => {
+    let app;
+    try {
+      app = createApp(args);
+    } catch (err) {
+      // createApp itself can throw (e.g., --config rejection); we don't have
+      // a fully-initialized Schematic yet, so surface a lightweight error.
+      console.error(err.message);
+      process.exit(1);
     }
 
-    else await app.run();
+    try {
+      await runFn(app, args);
+    } catch (err) {
+      displayErrorAndExit(app, err);
+    }
+  };
+}
+
+// Citty is ESM-only; bin/schematic stays CJS for compatibility with the
+// existing shebang path. Dynamic import at the top of the async IIFE
+// bridges the gap without needing a .mjs file or type=module in package.json.
+(async () => {
+  const { defineCommand, runMain } = await import('citty');
+
+  const buildRun = wrapRun(async (app) => {
+    await app.run();
+  });
+
+  const buildCommand = defineCommand({
+    meta: {
+      name: 'build',
+      description: 'Compile all schemas: sections, theme blocks, settings, locales',
+    },
+    args: { ...sharedArgs },
+    run: buildRun,
+  });
+
+  const scaffoldCommand = defineCommand({
+    meta: {
+      name: 'scaffold',
+      description: 'Create placeholder liquid + schema files for a new section or block',
+    },
+    args: {
+      name: {
+        type: 'positional',
+        description: 'Section/block name (kebab-case recommended)',
+        required: true,
+      },
+      short: {
+        type: 'boolean',
+        description: 'Use compact {% render %} syntax (writeCodeShort)',
+        alias: 's',
+      },
+      block: {
+        type: 'boolean',
+        description: 'Scaffold a theme block (no section/snippet files)',
+        alias: 'b',
+      },
+      ...sharedArgs,
+    },
+    run: wrapRun(async (app, args) => {
+      if (args.short && args.block) {
+        app.logger.error('--short and --block flags cannot be used together');
+        console.log('  --short applies to sections only');
+        process.exit(1);
+      }
+      await app.scaffold(args.name, args.short || false, args.block || false);
+    }),
+  });
+
+  const sectionCommand = defineCommand({
+    meta: {
+      name: 'section',
+      description: 'Rebuild a single section by file path',
+    },
+    args: {
+      file: {
+        type: 'positional',
+        description: 'Section file path (absolute or relative to theme root)',
+        required: true,
+      },
+      ...sharedArgs,
+    },
+    run: wrapRun(async (app, args) => {
+      await app.runSection(args.file);
+    }),
+  });
+
+  const initCommand = defineCommand({
+    meta: {
+      name: 'init',
+      description: 'Generate a custom executable file for running Schematic',
+    },
+    args: {
+      name: {
+        type: 'positional',
+        description: 'Filename for the generated executable (default: "schematic")',
+        required: false,
+        default: 'schematic',
+      },
+      ...sharedArgs,
+    },
+    run: wrapRun(async (app, args) => {
+      await app.init(args.name);
+    }),
+  });
+
+  const main = defineCommand({
+    meta: {
+      name: 'schematic',
+      version: pkg.version,
+      description: 'Write Shopify schema with JS, not JSON',
+    },
+    args: { ...sharedArgs },
+    // No subcommand → default to the build behavior (backward compatible with
+    // 2.x `npx schematic` invocation that runs a full build).
+    run: buildRun,
+    subCommands: {
+      build: buildCommand,
+      scaffold: scaffoldCommand,
+      section: sectionCommand,
+      init: initCommand,
+    },
+  });
+
+  try {
+    await runMain(main);
   } catch (err) {
-    displayErrorAndExit(app, err);
+    // Citty-level errors (invalid args, missing positionals) bubble out here.
+    console.error(err.message || String(err));
+    process.exit(1);
   }
 })();

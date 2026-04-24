@@ -80,4 +80,28 @@ describe('dist/ build smoke test', () => {
     expect(binContents).toMatch(/require\(['"]\.\.\/dist\/index\.cjs['"]\)/);
     expect(binContents).not.toMatch(/require\(['"]\.\.\/src\/schematic\.js['"]\)/);
   });
+
+  test('bin/schematic uses Citty for CLI parsing (phase 6.1)', () => {
+    const binContents = fs.readFileSync(
+      path.resolve(__dirname, '../../bin/schematic'),
+      'utf8'
+    );
+    expect(binContents).toMatch(/import\(['"]citty['"]\)/);
+    expect(binContents).toMatch(/defineCommand/);
+    expect(binContents).toMatch(/runMain/);
+  });
+
+  test('bin/schematic declares the expected subcommands', () => {
+    const binContents = fs.readFileSync(
+      path.resolve(__dirname, '../../bin/schematic'),
+      'utf8'
+    );
+    // Citty subcommands: build (+ default), scaffold, section, init
+    expect(binContents).toMatch(/name:\s*['"]build['"]/);
+    expect(binContents).toMatch(/name:\s*['"]scaffold['"]/);
+    expect(binContents).toMatch(/name:\s*['"]section['"]/);
+    expect(binContents).toMatch(/name:\s*['"]init['"]/);
+    // `watch` does NOT exist yet — that's phase 6.3. Guard against accidental addition.
+    expect(binContents).not.toMatch(/name:\s*['"]watch['"]/);
+  });
 });

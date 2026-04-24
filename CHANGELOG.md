@@ -115,6 +115,27 @@ Flagged in phase 1, reviewed again in phase 5 planning — the anomaly is invisi
 
 **Total after phase 5: 145 tests passing** (144 + 1 new assertion on `.d.ts` content).
 
+### Phase 6.1 — Citty CLI refactor
+
+First user-facing feature phase of v3.0.0. **No new subcommands** — this is a pure refactor of `bin/schematic` that swaps the hand-rolled 25-line parser for a real CLI framework. All existing subcommands and flag semantics preserved.
+
+- **Added:** `citty@^0.2.2` as a runtime dependency. Chosen over Commander.js for UnJS ecosystem alignment (eventual c12 config loader in phase 6.2 comes from the same org, consistent declarative style).
+- **Changed:** `bin/schematic` rewritten using Citty's `defineCommand` + `runMain`. Each subcommand (`build`, `scaffold`, `section`, `init`) is its own declarative `defineCommand` with typed `args`. Citty is ESM-only; the bin stays CJS and loads Citty via dynamic `await import()` inside an async IIFE, avoiding the need for a `.mjs` shebang or a `"type": "module"` package declaration.
+- **Added:** Global `--verbose` flag (equivalent to `SCHEMATIC_VERBOSE=1` env var but per-invocation).
+- **Added:** Global `--config <path>` flag. Accepts the flag but errors out with a "coming in v3.0.0" message for now — stabilizes the CLI surface so phase 6.2 can slot in without another flag addition. **Does NOT have a short alias `-v`** because Citty reserves `-v` for auto-generated `--version`.
+- **Added:** Auto-generated `--help` / `-h` output per subcommand and for the top-level CLI. Previously there was no help text at all.
+- **Added:** `--version` / `-v` flag reading from `package.json`.
+- **Added:** New subcommand `build` — explicit alias for the default `npx schematic` invocation. Both `schematic` and `schematic build` run the full compile (backward-compatible with 2.x).
+- **Preserved:** Error handling via typed error codes (`MISSING_DIRECTORIES`, `FILE_EXISTS`, `INIT_WRITE_FAILED`) from phase 2 — the same `displayErrorAndExit(app, err)` helper runs inside each subcommand's wrapped `run()` and exits code 1 on any thrown error. Citty-level errors (missing positional args, unknown flags) bubble up to a top-level catch that also exits 1.
+- **Preserved:** All environment variable overrides (`SCHEMATIC_VERBOSE`, `SCHEMATIC_PATH_*`) still work via `app.envDefaults()` which runs before the CLI flags are applied.
+- **`watch` subcommand NOT added** in this phase — that's phase 6.3. Dist-smoke test explicitly asserts `watch` is absent so an accidental addition doesn't slip in before the watcher work is planned.
+
+**Test coverage:** Two new assertions in `__tests__/unit/dist-smoke.test.js`:
+1. `bin/schematic` uses Citty (`import('citty')`, `defineCommand`, `runMain`).
+2. Subcommand list is exactly `build` / `scaffold` / `section` / `init` — guards against both removals and accidental additions.
+
+**Total after phase 6.1: 147 tests passing** (145 + 2 new CLI-surface assertions).
+
 ## 2.2.10
 - **Docs:** README updates to document v2.2.9 functionality and trim stale content.
   - Added a Node 20 prerequisite note under `## To use`. Users on older Node now see the requirement up front rather than hitting a cryptic install-time error from npm.
